@@ -33,8 +33,10 @@ jobs:
 
       - name: Restore signing keystore
         run: |
-          mkdir -p ~/.android
-          echo "${{ secrets.DEBUG_KEYSTORE_BASE64 }}" | base64 -d > ~/.android/debug.keystore
+          if [ -n "${{ secrets.DEBUG_KEYSTORE_BASE64 }}" ]; then
+            mkdir -p ~/.android
+            echo "${{ secrets.DEBUG_KEYSTORE_BASE64 }}" | base64 -d > ~/.android/debug.keystore
+          fi
 
       - name: Install Android SDK platform 37
         run: |
