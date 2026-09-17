@@ -35,9 +35,14 @@ jobs:
 
       - name: Restore signing keystore
         run: |
+          KEYSTORE_PATH="$HOME/.android/debug.keystore"
           if [ -n "${{ secrets.DEBUG_KEYSTORE_BASE64 }}" ]; then
             mkdir -p ~/.android
             echo "${{ secrets.DEBUG_KEYSTORE_BASE64 }}" | base64 -d > ~/.android/debug.keystore
+            if ! keytool -list -keystore "$KEYSTORE_PATH" -storepass android -alias androiddebugkey >/dev/null 2>&1; then
+              echo "::warning::DEBUG_KEYSTORE_BASE64 无法读取，将使用临时调试 keystore"
+              rm -f "$KEYSTORE_PATH"
+            fi
           fi
 
       - name: Install Android SDK platform 37
