@@ -35,6 +35,7 @@ import io.github.erenche.syncclipboard.common.Prefs
 import io.github.erenche.syncclipboard.common.model.AppConfig
 import io.github.erenche.syncclipboard.common.model.ServerConfig
 import io.github.erenche.syncclipboard.common.model.ServerType
+import io.github.erenche.syncclipboard.xposed.api.ClientFactory
 import kotlinx.coroutines.Dispatchers
 import kotlinx.serialization.json.Json
 import kotlinx.coroutines.launch
@@ -97,6 +98,7 @@ private fun ServerEditHost(
         Prefs.saveConfig(context, config)
         appConfig = config
         scope.launch {
+            var pushed = false
             try {
                 val configJson = Json.encodeToString(AppConfig.serializer(), config)
                 val payload = Bundle().apply { putString("config", configJson) }
@@ -105,9 +107,14 @@ private fun ServerEditHost(
                     .key(BridgeKeys.PUSH_CONFIG)
                     .payload(payload)
                     .send()
+                pushed = true
             } catch (_: Exception) {
-                // 配置已经持久化；SystemUI 下次启动或配置刷新时会重新读取。
+                // The app and SystemUI have separate storage. A later server-page
+                // visit retries the push; do not pretend this save reached the engine.
             } finally {
+                if (!pushed) {
+                    Toast.makeText(context, "配置已保存；同步引擎更新失败，请稍后重试", Toast.LENGTH_LONG).show()
+                }
                 onFinished(true)
             }
         }
@@ -136,8 +143,15 @@ private fun ServerEditHost(
             }
         },
         onSetActive = if (effectiveIndex >= 0 && effectiveIndex != appConfig.activeServerIndex) {
-            {
-                saveAndFinish(appConfig.copy(activeServerIndex = effectiveIndex))
+            { editedServer ->
+                val servers = appConfig.servers.toMutableList()
+                servers[effectiveIndex] = editedServer
+                saveAndFinish(
+                    appConfig.copy(
+                        servers = servers,
+                        activeServerIndex = effectiveIndex
+                    )
+                )
             }
         } else null,
         onBack = { onFinished(false) },
@@ -195,13 +209,38 @@ fun ServerConfigScreen(
         )
     }
 
-    // Push current config to both app and systemui process on screen load
+    // SystemUI owns a separate preference file.  Never overwrite it with the
+    // empty configuration produced by a fresh install or cleared app storage.
     LaunchedEffect(Unit) {
+        var configToPush: AppConfig? = appConfig.takeIf { Prefs.isConfigInitialized(context) }
         try {
-            val configJson = Json.encodeToString(AppConfig.serializer(), appConfig)
-            val payload = android.os.Bundle().apply { putString("config", configJson) }
-            SyncClipboardBridge.with(context).to("com.android.systemui").key(BridgeKeys.PUSH_CONFIG).payload(payload).send()
-        } catch (_: Exception) {}
+            val result = SyncClipboardBridge.with(context)
+                .to("com.android.systemui")
+                .key(BridgeKeys.GET_CONFIG)
+                .await()
+            val engineJson = result.getString("config")
+            val engineConfig = engineJson?.let {
+                runCatching { Json.decodeFromString(AppConfig.serializer(), it) }.getOrNull()
+            }
+            if (!Prefs.isConfigInitialized(context) && appConfig.servers.isEmpty() &&
+                engineConfig != null && engineConfig.servers.isNotEmpty()
+            ) {
+                Prefs.saveConfig(context, engineConfig)
+                appConfig = engineConfig
+                configToPush = engineConfig
+            }
+        } catch (_: Exception) {
+            // Engine may not be running yet.  Do not push an unowned empty config.
+        }
+
+        configToPush?.let { config ->
+            runCatching {
+                val configJson = Json.encodeToString(AppConfig.serializer(), config)
+                val payload = android.os.Bundle().apply { putString("config", configJson) }
+                SyncClipboardBridge.with(context).to("com.android.systemui")
+                    .key(BridgeKeys.PUSH_CONFIG).payload(payload).send()
+            }
+        }
     }
 
     ServerListPane(
@@ -379,7 +418,7 @@ private fun ServerEditPage(
     onRequestDelete: () -> Unit,
     onDismissDelete: () -> Unit,
     onConfirmDelete: () -> Unit,
-    onSetActive: (() -> Unit)?,
+    onSetActive: ((ServerConfig) -> Unit)?,
     onBack: () -> Unit,
     onSave: (ServerConfig) -> Unit
 ) {
@@ -412,16 +451,23 @@ private fun ServerEditPage(
         forcePathStyle = serverType == ServerType.s3 && forcePathStyle
     )
 
+    fun isSecureServerUrl(value: String): Boolean = runCatching {
+        val parsed = java.net.URI(value.trim())
+        parsed.scheme.equals("https", ignoreCase = true) && !parsed.host.isNullOrBlank()
+    }.getOrDefault(false)
+
     /** 必填字段校验，返回错误提示（null 表示通过） */
     fun validateForm(): String? = when (serverType) {
         ServerType.s3 -> when {
             username.isBlank() -> context.getString(R.string.server_access_key_required)
             password.isBlank() -> context.getString(R.string.server_secret_key_required)
             bucketName.isBlank() -> context.getString(R.string.server_bucket_required)
+            url.isNotBlank() && !isSecureServerUrl(url) -> "自定义 S3 地址必须使用有效的 HTTPS URL"
             else -> null
         }
         else -> when {
             url.isBlank() -> context.getString(R.string.server_url_required)
+            !isSecureServerUrl(url) -> "服务器地址必须使用有效的 HTTPS URL"
             username.isBlank() -> context.getString(R.string.server_username_required)
             password.isBlank() -> context.getString(R.string.server_password_required)
             else -> null
@@ -589,7 +635,13 @@ private fun ServerEditPage(
                     TextButton(
                         text = stringResource(R.string.server_set_active),
                         colors = ButtonDefaults.textButtonColorsPrimary(),
-                        onClick = onSetActive,
+                        onClick = {
+                            validateForm()?.let {
+                                Toast.makeText(context, it, Toast.LENGTH_SHORT).show()
+                                return@TextButton
+                            }
+                            onSetActive(buildServerConfig())
+                        },
                         modifier = Modifier.fillMaxWidth()
                     )
                     Spacer(modifier = Modifier.height(6.dp))
@@ -796,42 +848,12 @@ private fun SectionTitle(text: String) {
 }
 
 /**
- * 直接 HTTP 测试服务器连接 — 绕过 Bridge IPC 避免跨进程广播被系统屏蔽。
+ * Direct backend-specific test, without depending on SystemUI IPC.
+ * ClientFactory uses the real SyncClipboard, WebDAV, or signed S3 protocol;
+ * a generic GET cannot verify credentials for all three backends.
  */
 private suspend fun performTestConnection(config: ServerConfig): Boolean = withContext(Dispatchers.IO) {
-    try {
-        val urlStr = buildTestUrl(config)
-        val url = java.net.URL(urlStr)
-        val conn = url.openConnection() as java.net.HttpURLConnection
-        conn.connectTimeout = 8000
-        conn.readTimeout = 8000
-        conn.requestMethod = "GET"
-        conn.instanceFollowRedirects = true
-
-        if (!config.username.isNullOrBlank() && !config.password.isNullOrBlank()) {
-            val credentials = "${config.username}:${config.password}"
-            val encoded = android.util.Base64.encodeToString(
-                credentials.toByteArray(Charsets.UTF_8), android.util.Base64.NO_WRAP
-            )
-            conn.setRequestProperty("Authorization", "Basic $encoded")
-        }
-
-        // 任意 HTTP 响应（包括 401/404）表示服务器可达
-        conn.responseCode > 0
-    } catch (e: Exception) {
-        false
-    }
-}
-
-/** 根据服务器类型构建测试 URL */
-private fun buildTestUrl(config: ServerConfig): String {
-    return when (config.type) {
-        ServerType.syncclipboard -> "${config.url.trimEnd('/')}/clipboard"
-        ServerType.webdav -> config.url.trimEnd('/')
-        ServerType.s3 -> {
-            config.url.ifBlank {
-                "https://s3.${config.region ?: "us-east-1"}.amazonaws.com"
-            }
-        }
-    }
+    runCatching {
+        ClientFactory.createClient(config).testConnection()
+    }.isSuccess
 }

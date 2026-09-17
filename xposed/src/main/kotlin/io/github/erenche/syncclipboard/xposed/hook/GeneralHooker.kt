@@ -23,11 +23,6 @@ object GeneralHooker : PackageHooker() {
     override fun onHook() {
         Logger.info(TAG, "onHook() called, packageName=$packageName, isMainProcess=${isMainProcess()}")
 
-        // 允许明文 HTTP（局域网自建服务器 http:// 场景）：
-        // SystemUI 进程的网络安全策略默认禁止 cleartext，Ktor/OkHttp 会直接抛异常，
-        // 钩住 NetworkSecurityPolicy 让 HTTP 服务器可用
-        hookCleartextTrafficPermitted(module)
-
         doOnAppCreated { app ->
             Logger.info(TAG, "App created: ${app.packageName}")
 
@@ -46,8 +41,6 @@ object GeneralHooker : PackageHooker() {
      */
     fun onHotReloaded(module: XposedModule) {
         Logger.info(TAG, "onHotReloaded() re-installing hooks")
-        hookCleartextTrafficPermitted(module)
-
         val app = currentApplication() ?: run {
             Logger.warn(TAG, "onHotReloaded: Application not available yet")
             return
@@ -75,19 +68,4 @@ object GeneralHooker : PackageHooker() {
         null
     }
 
-    /** 钩住 NetworkSecurityPolicy.isCleartextTrafficPermitted，允许明文 HTTP 流量 */
-    private fun hookCleartextTrafficPermitted(module: XposedModule) {
-        try {
-            val clazz = Class.forName("android.security.NetworkSecurityPolicy")
-            clazz.getDeclaredMethod("isCleartextTrafficPermitted").apply {
-                module.hook(this).intercept { true }
-            }
-            clazz.getDeclaredMethod("isCleartextTrafficPermitted", String::class.java).apply {
-                module.hook(this).intercept { true }
-            }
-            Logger.info(TAG, "Cleartext traffic policy hooked (HTTP allowed)")
-        } catch (e: Throwable) {
-            Logger.warn(TAG, "Failed to hook NetworkSecurityPolicy: ${e.message}")
-        }
-    }
 }
