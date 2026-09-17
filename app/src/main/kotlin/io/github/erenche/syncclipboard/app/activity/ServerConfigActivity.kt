@@ -40,6 +40,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.serialization.json.Json
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 
 import top.yukonga.miuix.kmp.basic.*
 import top.yukonga.miuix.kmp.icon.MiuixIcons
@@ -451,9 +452,10 @@ private fun ServerEditPage(
         forcePathStyle = serverType == ServerType.s3 && forcePathStyle
     )
 
-    fun isSecureServerUrl(value: String): Boolean = runCatching {
+    fun isValidServerUrl(value: String): Boolean = runCatching {
         val parsed = java.net.URI(value.trim())
-        parsed.scheme.equals("https", ignoreCase = true) && !parsed.host.isNullOrBlank()
+        val scheme = parsed.scheme?.lowercase()
+        (scheme == "https" || scheme == "http") && !parsed.host.isNullOrBlank()
     }.getOrDefault(false)
 
     /** 必填字段校验，返回错误提示（null 表示通过） */
@@ -462,12 +464,12 @@ private fun ServerEditPage(
             username.isBlank() -> context.getString(R.string.server_access_key_required)
             password.isBlank() -> context.getString(R.string.server_secret_key_required)
             bucketName.isBlank() -> context.getString(R.string.server_bucket_required)
-            url.isNotBlank() && !isSecureServerUrl(url) -> "自定义 S3 地址必须使用有效的 HTTPS URL"
+            url.isNotBlank() && !isValidServerUrl(url) -> context.getString(R.string.server_url_invalid)
             else -> null
         }
         else -> when {
             url.isBlank() -> context.getString(R.string.server_url_required)
-            !isSecureServerUrl(url) -> "服务器地址必须使用有效的 HTTPS URL"
+            !isValidServerUrl(url) -> context.getString(R.string.server_url_invalid)
             username.isBlank() -> context.getString(R.string.server_username_required)
             password.isBlank() -> context.getString(R.string.server_password_required)
             else -> null
@@ -854,6 +856,8 @@ private fun SectionTitle(text: String) {
  */
 private suspend fun performTestConnection(config: ServerConfig): Boolean = withContext(Dispatchers.IO) {
     runCatching {
-        ClientFactory.createClient(config).testConnection()
+        withTimeout(10000L) {
+            ClientFactory.createClient(config).testConnection()
+        }
     }.isSuccess
 }
