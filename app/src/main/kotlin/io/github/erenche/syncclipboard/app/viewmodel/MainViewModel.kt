@@ -127,7 +127,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     @Suppress("DEPRECATION")
     private fun fetchLatestRelease(): UpdateInfo? {
-        val releaseApi = "https://api.github.com/repos/yuangr/syncclipboard-xposed/releases/latest"
+        val releaseApi = "https://api.github.com/repos/shaklow/syncclipboard-xposed/releases/latest"
         return runCatching {
             val conn = java.net.URL(releaseApi).openConnection() as java.net.HttpURLConnection
             conn.connectTimeout = 5000
