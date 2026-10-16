@@ -1,0 +1,49 @@
+name: Project checks
+
+on:
+  pull_request:
+  push:
+    branches: [main, dev]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: checks-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      # PR 检查不读取发布密钥，调试签名由构建任务生成。
+      - name: Prepare Android SDK
+        run: |
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          (yes || true) | "$SDKMANAGER" --licenses > /dev/null
+          "$SDKMANAGER" --channel=3 "platforms;android-37" || \
+            "$SDKMANAGER" --channel=3 "platforms;android-37.0"
+          "$SDKMANAGER" "build-tools;36.1.0"
+          sed -i 's/\r$//' gradlew
+          chmod +x gradlew
+      - name: Tests, lint and debug build
+        run: ./gradlew testDebugUnitTest lintDebug :shell:assembleDebug --no-daemon
+      - name: Upload verification reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: verification-reports
+          path: |
+            **/build/reports/tests/**
+            **/build/reports/lint-results-*.html
+            **/build/test-results/**
+          if-no-files-found: warn

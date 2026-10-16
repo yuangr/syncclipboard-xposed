@@ -176,6 +176,7 @@ object SystemNotificationHooker {
         val ctx = systemServerContext() ?: return
         try {
             val intent = Intent(BridgeKeys.ACTION_NOTIF_CAPTURE).apply {
+                setPackage(io.github.erenche.syncclipboard.common.PackageNames.SYSTEM_UI)
                 putExtra(BridgeKeys.EXTRA_NOTIF_BODY, body)
                 putExtra(BridgeKeys.EXTRA_NOTIF_PKG, pkg)
             }
@@ -188,20 +189,35 @@ object SystemNotificationHooker {
 
     /** 系统进程发送广播必须指定用户（system_server 的 system context 无用户限定，否则广播不投递） */
     private fun sendBroadcastAsUser(ctx: Context, intent: Intent) {
+        // 通知钩子可能仍在应用的 Binder 调用中，以宿主身份发送内部广播。
+        val identity = android.os.Binder.clearCallingIdentity()
+        try {
+            sendAsSystemUser(ctx, intent)
+        } finally { android.os.Binder.restoreCallingIdentity(identity) }
+    }
+
+    private fun sendAsSystemUser(ctx: Context, intent: Intent) {
         try {
             // sendBroadcastAsUser 与 UserHandle.SYSTEM 均为 @hide，编译期不可见；
             // system_server 无 hidden API 限制，反射调用即可
             val uhClass = android.os.UserHandle::class.java
             val systemUser = uhClass.getField("SYSTEM").get(null) as android.os.UserHandle
-            val method = Context::class.java.getMethod(
-                "sendBroadcastAsUser",
-                Intent::class.java,
-                android.os.UserHandle::class.java
-            )
-            method.invoke(ctx, intent, systemUser)
+            if (android.os.Build.VERSION.SDK_INT >= 34) {
+                val options = android.app.BroadcastOptions.makeBasic().setShareIdentityEnabled(true).toBundle()
+                Context::class.java.getMethod("sendBroadcastAsUser", Intent::class.java,
+                    android.os.UserHandle::class.java, String::class.java, android.os.Bundle::class.java)
+                    .invoke(ctx, intent, systemUser,
+                        io.github.erenche.syncclipboard.bridge.BridgeSecurity.PERMISSION_SYSTEM_EVENT, options)
+            } else {
+                Context::class.java.getMethod("sendBroadcastAsUser", Intent::class.java,
+                    android.os.UserHandle::class.java, String::class.java)
+                    .invoke(ctx, intent, systemUser,
+                        io.github.erenche.syncclipboard.bridge.BridgeSecurity.PERMISSION_SYSTEM_EVENT)
+            }
         } catch (e: Throwable) {
             // 反射失败时退回无用户限定的广播（部分版本仍会投递）
-            ctx.sendBroadcast(intent)
+            io.github.erenche.syncclipboard.bridge.BridgeSecurity.sendBroadcast(ctx, intent,
+                io.github.erenche.syncclipboard.bridge.BridgeSecurity.PERMISSION_SYSTEM_EVENT)
         }
     }
 

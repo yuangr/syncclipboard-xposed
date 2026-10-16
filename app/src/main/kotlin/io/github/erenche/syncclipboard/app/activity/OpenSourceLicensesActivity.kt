@@ -20,6 +20,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -77,6 +78,7 @@ private val referenceProjects = listOf(
 @Composable
 fun OpenSourceLicensesScreen() {
     val context = LocalContext.current
+    val resources = LocalResources.current
     val activity = context as? Activity
 
     // shell 插件生成的依赖许可清单（资源在 apk 内，resource id 跨模块用 getIdentifier 获取）
@@ -98,14 +100,14 @@ fun OpenSourceLicensesScreen() {
     }
 
     // 参考项目与自动依赖合并为统一列表，按名称字母排序
-    val entries = remember(autoLibraries) {
+    val entries = remember(autoLibraries, resources) {
         val refs = referenceProjects.map { p ->
             LicenseEntry(
                 id = "ref_${p.url}",
-                name = context.getString(p.nameRes),
+                name = resources.getString(p.nameRes),
                 version = null,
                 description = null,
-                license = context.getString(p.licenseRes),
+                license = resources.getString(p.licenseRes),
                 url = p.url,
             )
         }

@@ -24,26 +24,27 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun historyItemDao(): HistoryItemDao
 
     companion object {
-        @Volatile
-        private var instance: AppDatabase? = null
+        private val instances = mutableMapOf<String, AppDatabase>()
 
-        fun getInstance(context: Context): AppDatabase {
-            return instance ?: synchronized(this) {
-                instance ?: Room.databaseBuilder(
+        @Synchronized
+        fun getInstance(context: Context, serverKey: String): AppDatabase {
+            return instances.getOrPut(serverKey) {
+                Room.databaseBuilder(
                     context.applicationContext,
                     AppDatabase::class.java,
                     // 绝对路径：落盘于 filesDir/SyncClipboard/（路径以 / 开头时 Room 不再用 databases/）
-                    EngineStorage.databaseFile(context.applicationContext)
+                    EngineStorage.databaseFile(context.applicationContext, serverKey)
                         .apply { parentFile?.mkdirs() }
                         .absolutePath
-                ).build().also { instance = it }
+                ).build()
             }
         }
 
-        /** 关闭并复位单例（模块热重载前调用，释放旧代数据库连接） */
+        /** 热重载前关闭所有服务器数据库。 */
+        @Synchronized
         fun closeInstance() {
-            instance?.let { db -> runCatching { db.close() } }
-            instance = null
+            instances.values.forEach { db -> runCatching { db.close() } }
+            instances.clear()
         }
     }
 }

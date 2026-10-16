@@ -1,34 +1,38 @@
 package io.github.erenche.syncclipboard.bridge
 
+import android.app.BroadcastOptions
+import android.content.BroadcastReceiver
 import android.content.Context
+import android.content.Intent
 import android.os.Binder
+import android.os.Build
 import io.github.erenche.syncclipboard.common.PackageNames
 
-/**
- * Bridge 安全工具 — 校验广播发送方是否可信。
- *
- * IPC 是双向的：App ↔ SystemUI，两者都需放行；第三方 App 一律拒绝。
- *
- * 注意：不要用 [android.os.Process.SYSTEM_UID] 判断 SystemUI，部分 OEM（OPPO/小米等）
- * 将 SystemUI 运行在独立的应用 UID 上（如 u0_a242），而非 system uid（1000）。
- * 用包名匹配跨设备通用。
- */
+/** 广播使用系统发送方身份；Binder UID 仅用于真实回调事务。 */
 object BridgeSecurity {
+    const val PERMISSION_SYSTEM_EVENT = "android.permission.STATUS_BAR_SERVICE"
 
-    /**
-     * 校验当前广播发送方是否可信（本 App 或 SystemUI）。
-     *
-     * 应在 [android.content.BroadcastReceiver.onReceive] 开头调用：
-     * ```
-     * override fun onReceive(context: Context, intent: Intent) {
-     *     if (!BridgeSecurity.isTrustedSender(context)) return
-     *     // ... 原有逻辑
-     * }
-     * ```
-     */
-    fun isTrustedSender(context: Context): Boolean {
-        val callerUid = Binder.getCallingUid()
-        val pkgs = context.packageManager.getPackagesForUid(callerUid) ?: return false
-        return PackageNames.APPLICATION in pkgs || PackageNames.SYSTEM_UI in pkgs
+    fun isTrustedSender(context: Context, receiver: BroadcastReceiver, permission: String): Boolean {
+        val uid = if (Build.VERSION.SDK_INT >= 34) receiver.sentFromUid else -1
+        val allowed = if (permission == SyncClipboardBridge.PERMISSION_BRIDGE) {
+            setOf(PackageNames.APPLICATION)
+        } else setOf(PackageNames.SYSTEM_UI, PackageNames.ANDROID)
+        return BroadcastSenderPolicy.accepts(uid, trustedUid(context, uid, allowed),
+            permission == SyncClipboardBridge.PERMISSION_BRIDGE || permission == PERMISSION_SYSTEM_EVENT)
+    }
+
+    fun isTrustedCallback(context: Context, expectedPackage: String): Boolean =
+        trustedUid(context, Binder.getCallingUid(), setOf(expectedPackage))
+
+    private fun trustedUid(context: Context, uid: Int, packages: Set<String>): Boolean =
+        uid >= 0 && packages.any { pkg ->
+            runCatching { context.packageManager.getApplicationInfo(pkg, 0).uid == uid }.getOrDefault(false)
+        }
+
+    fun sendBroadcast(context: Context, intent: Intent, receiverPermission: String? = null) {
+        if (Build.VERSION.SDK_INT >= 34) {
+            context.sendBroadcast(intent, receiverPermission,
+                BroadcastOptions.makeBasic().setShareIdentityEnabled(true).toBundle())
+        } else context.sendBroadcast(intent, receiverPermission)
     }
 }

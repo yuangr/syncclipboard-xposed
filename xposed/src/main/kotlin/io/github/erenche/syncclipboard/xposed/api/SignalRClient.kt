@@ -135,11 +135,11 @@ class SignalRClient(
             val body = response.bodyAsText()
             val obj = json.parseToJsonElement(body).jsonObject
             val connectionId = obj["connectionId"]?.jsonPrimitive?.contentOrNull
-            Logger.info(TAG, "Negotiate success: connectionId=$connectionId")
+            Logger.info(TAG, "Negotiate success")
             connectionId
         } catch (e: Exception) {
-            Log.w(TAG, "Negotiate error: ${e.message}")
-            Logger.warn(TAG, "Negotiate error: ${e.message}")
+            Log.w(TAG, "Negotiate error: ${io.github.erenche.syncclipboard.common.util.SafeDiagnostics.failure(e)}")
+            Logger.warn(TAG, "Negotiate error: ${io.github.erenche.syncclipboard.common.util.SafeDiagnostics.failure(e)}")
             null
         }
     }
@@ -172,8 +172,8 @@ class SignalRClient(
                 } catch (e: CancellationException) {
                     throw e
                 } catch (e: Exception) {
-                    Log.w(TAG, "Connection error: ${e.message}")
-                    Logger.warn(TAG, "Connection error: ${e.message}")
+                    Log.w(TAG, "Connection error: ${io.github.erenche.syncclipboard.common.util.SafeDiagnostics.failure(e)}")
+                    Logger.warn(TAG, "Connection error: ${io.github.erenche.syncclipboard.common.util.SafeDiagnostics.failure(e)}")
                 }
                 // 连接断开，更新状态
                 updateConnectionState(false)
@@ -190,7 +190,7 @@ class SignalRClient(
                 retryDelay = (retryDelay * 2).coerceAtMost(MAX_RECONNECT_DELAY_MS)
             }
         }
-        Logger.info(TAG, "start: SignalR client started, url=${buildWebSocketUrl()}")
+        Logger.info(TAG, "start: SignalR client started")
     }
 
     /** 停止连接 */
@@ -219,8 +219,8 @@ class SignalRClient(
             // negotiate 阶段（失败时降级为直连，兼容默认配置的服务器）
             val connectionId = negotiate()
             val urlWithId = buildWebSocketUrl(connectionId)
-            Log.w(TAG, "Connecting to $urlWithId")
-            Logger.info(TAG, "Connecting to $urlWithId")
+            Log.w(TAG, "Connecting with negotiated identity")
+            Logger.info(TAG, "Connecting with negotiated identity")
 
             try {
                 httpClient.webSocket(
@@ -239,8 +239,8 @@ class SignalRClient(
             } catch (e: Exception) {
                 // 带 connectionId 的 WebSocket 升级失败（如反代返回 502/404），
                 // 降级为不带 id 的直连模式（部分服务器/反代不支持 id 参数路由）
-                Log.w(TAG, "WebSocket with connectionId failed: ${e.message}, falling back to direct connect")
-                Logger.warn(TAG, "WebSocket with id failed, falling back to direct: ${e.message}")
+                Log.w(TAG, "WebSocket with connectionId failed: ${io.github.erenche.syncclipboard.common.util.SafeDiagnostics.failure(e)}, falling back to direct connect")
+                Logger.warn(TAG, "WebSocket with id failed, falling back to direct: ${io.github.erenche.syncclipboard.common.util.SafeDiagnostics.failure(e)}")
                 // 记住该路径不通，后续直连优先
                 preferDirect = true
             }
@@ -248,8 +248,8 @@ class SignalRClient(
 
         // 直连：不带 connectionId（negotiate 失败或带 id 路径已确认不通）
         val urlDirect = buildWebSocketUrl(null)
-        Log.w(TAG, "Fallback connecting to $urlDirect")
-        Logger.info(TAG, "Fallback connecting to $urlDirect")
+        Log.w(TAG, "Fallback connecting directly")
+        Logger.info(TAG, "Fallback connecting directly")
         httpClient.webSocket(
             urlString = urlDirect,
             request = {
@@ -286,7 +286,7 @@ class SignalRClient(
                     session.send(Frame.Text("{\"type\":6}$RECORD_SEPARATOR"))
                     Logger.debug(TAG, "Ping sent")
                 } catch (e: Exception) {
-                    Logger.debug(TAG, "Ping send failed: ${e.message}")
+                    Logger.debug(TAG, "Ping send failed: ${io.github.erenche.syncclipboard.common.util.SafeDiagnostics.failure(e)}")
                     break
                 }
             }
@@ -305,7 +305,7 @@ class SignalRClient(
                         if (!handshakeConfirmed) {
                             val error = obj["error"]?.jsonPrimitive?.contentOrNull
                             if (error != null) {
-                                throw RuntimeException("SignalR handshake failed: $error")
+                                throw RuntimeException("SignalR handshake failed")
                             }
                             // 握手成功
                             handshakeConfirmed = true
@@ -319,7 +319,7 @@ class SignalRClient(
                     } catch (e: Exception) {
                         // SignalR payloads can contain clipboard text and history data.
                         // Keep diagnostics useful without persisting user content in logs.
-                        Logger.warn(TAG, "Failed to parse SignalR message: ${e.message} (length=${msg.length})")
+                        Logger.warn(TAG, "Failed to parse message: ${io.github.erenche.syncclipboard.common.util.SafeDiagnostics.failure(e)}, length=${msg.length}")
                         if (e is RuntimeException && e.message?.contains("handshake") == true) {
                             throw e
                         }
@@ -354,8 +354,8 @@ class SignalRClient(
             // type=7: Close（服务端主动关闭）
             7 -> {
                 val error = obj["error"]?.jsonPrimitive?.contentOrNull
-                Logger.warn(TAG, "Server sent close: $error")
-                throw RuntimeException("Server closed connection: $error")
+                Logger.warn(TAG, "Server sent close")
+                throw RuntimeException("Server closed connection")
             }
             // type=3: InvocationBindingResult, type=4: StreamItem, type=5: Completion
             // SyncClipboard 不使用这些，忽略
@@ -386,11 +386,11 @@ class SignalRClient(
                     onHistoryChanged?.invoke(dto)
                 }
                 else -> {
-                    Logger.debug(TAG, "Unknown target: $target")
+                    Logger.debug(TAG, "Unknown invocation target")
                 }
             }
         } catch (e: Exception) {
-            Logger.warn(TAG, "Failed to handle invocation '$target': ${e.message}")
+            Logger.warn(TAG, "Failed to handle invocation: ${io.github.erenche.syncclipboard.common.util.SafeDiagnostics.failure(e)}")
         }
     }
 

@@ -65,7 +65,7 @@ class InteractiveHighlight(
                     Color.White.copy(0.06f * progress),
                     blendMode = BlendMode.Plus
                 )
-                shader?.apply {
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) shader?.apply {
                     val position = position(size, positionAnimation.value)
                     setFloatUniform("size", size.width, size.height)
                     setColorUniform("color", Color.White.copy(0.12f * progress).toArgb())

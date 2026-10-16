@@ -30,6 +30,7 @@ class SyncClipboardApp : Application() {
         Logger.logLevel = config.logLevel
         Logger.maxBufferSize = config.logBufferSize
         Logger.info(TAG, "SyncClipboardApp created")
+        ConfigSyncCoordinator.start(this)
 
         // SyncEngine 在 com.android.systemui 进程中运行（由 GeneralHooker 初始化）
         // App 进程不初始化 SyncEngine，通过 bridge 向 SystemUI 引擎查询

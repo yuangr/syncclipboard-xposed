@@ -3,6 +3,10 @@
     xmlns:tools="http://schemas.android.com/tools">
 
     <uses-sdk tools:overrideLibrary="top.yukonga.miuix.kmp.blur" />
+    <queries>
+        <package android:name="com.android.systemui" />
+        <package android:name="android" />
+    </queries>
 
     <!-- 自定义 signature 权限：保护 SystemUI 进程中的 Bridge receiver，
          仅与本 App 同签名的进程可发送广播。App 与自身签名一致，自动获得授权；
@@ -21,6 +25,9 @@
 
     <application
         android:name=".SyncClipboardApp"
+        android:allowBackup="false"
+        android:fullBackupContent="@xml/backup_rules"
+        android:dataExtractionRules="@xml/data_extraction_rules"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
         android:roundIcon="@mipmap/ic_launcher"

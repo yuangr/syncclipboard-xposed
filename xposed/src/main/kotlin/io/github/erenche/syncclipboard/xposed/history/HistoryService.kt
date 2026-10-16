@@ -18,6 +18,7 @@ import java.util.UUID
 
 /**
  * HistoryService — 剪贴板历史记录服务（Room 数据库后端）。
+ * 每个服务器使用独立数据库和归档目录。
  *
  * - 本地剪贴板变化 → [addLocalContent]：syncStatus = LocalOnly，文件复制到持久化历史目录
  * - 从服务器下载 → [addRemoteContent]：syncStatus = Synced，使用已下载的文件路径
@@ -25,7 +26,7 @@ import java.util.UUID
  *
  * 数据持久化由 Room 负责，每次写入自动增量更新，不再全量序列化 JSON。
  */
-class HistoryService(context: Context) {
+class HistoryService(context: Context, val serverKey: String) {
 
     private val ctx: Context = context.applicationContext
 
@@ -44,9 +45,9 @@ class HistoryService(context: Context) {
     @Volatile
     private var lastDiskLimitCheck = 0L
 
-    private val historyDir = EngineStorage.historyDir(context).apply { if (!exists()) mkdirs() }
+    private val historyDir = EngineStorage.historyDir(context, serverKey).apply { if (!exists()) mkdirs() }
 
-    private val db = AppDatabase.getInstance(ctx)
+    private val db = AppDatabase.getInstance(ctx, serverKey)
     private val dao = db.historyItemDao()
 
     fun observeAll(): Flow<List<HistoryItem>> =

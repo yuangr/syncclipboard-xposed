@@ -1,16 +1,11 @@
 package io.github.erenche.syncclipboard.app.tile
 
 import android.os.Build
-import android.os.Bundle
 import android.service.quicksettings.Tile
 import android.service.quicksettings.TileService
 import androidx.annotation.RequiresApi
-import io.github.erenche.syncclipboard.bridge.BridgeKeys
-import io.github.erenche.syncclipboard.bridge.SyncClipboardBridge
 import io.github.erenche.syncclipboard.common.Prefs
-import io.github.erenche.syncclipboard.common.model.AppConfig
 import io.github.erenche.syncclipboard.common.util.Logger
-import kotlinx.serialization.json.Json
 
 /**
  * 快捷设置磁贴 — 切换"自动同步"总开关。
@@ -72,8 +67,7 @@ class AutoSyncTileService : TileService() {
         }
 
         try {
-            Prefs.saveConfig(this, newConfig)
-            pushConfigToSystemUI(newConfig)
+            if (!io.github.erenche.syncclipboard.app.ConfigSyncCoordinator.save(this, newConfig)) return
         } catch (e: Exception) {
             Logger.warn(TAG, "Failed to apply config: ${e.message}")
         }
@@ -85,18 +79,5 @@ class AutoSyncTileService : TileService() {
         }
     }
 
-    /** 通过 bridge 推送配置到 SystemUI 进程 */
-    private fun pushConfigToSystemUI(config: AppConfig) {
-        try {
-            val configJson = Json.encodeToString(AppConfig.serializer(), config)
-            val payload = Bundle().apply { putString("config", configJson) }
-            SyncClipboardBridge.with(this)
-                .to("com.android.systemui")
-                .key(BridgeKeys.PUSH_CONFIG)
-                .payload(payload)
-                .send()
-        } catch (e: Exception) {
-            Logger.warn(TAG, "Failed to push config via bridge: ${e.message}")
-        }
-    }
+
 }

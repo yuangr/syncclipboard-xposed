@@ -5,6 +5,7 @@ import io.github.erenche.syncclipboard.common.PackageNames
 import io.github.erenche.syncclipboard.common.util.Logger
 import io.github.erenche.syncclipboard.xposed.hook.GeneralHooker
 import io.github.erenche.syncclipboard.xposed.hook.SystemNotificationHooker
+import io.github.erenche.syncclipboard.xposed.hook.SystemLocalNetworkHooker
 import io.github.erenche.syncclipboard.xposed.sync.SyncEngine
 import io.github.libxposed.api.XposedModule
 import io.github.libxposed.api.XposedModuleInterface
@@ -25,6 +26,7 @@ import io.github.libxposed.api.XposedModuleInterface
  */
 @Keep
 class ModuleEntry : XposedModule() {
+    private var systemServerProcess = false
 
     companion object {
         private const val TAG = "ModuleEntry"
@@ -37,6 +39,7 @@ class ModuleEntry : XposedModule() {
 
     override fun onModuleLoaded(param: XposedModuleInterface.ModuleLoadedParam) {
         instance = this
+        systemServerProcess = param.processName == "system_server"
         Logger.info(TAG, "onModuleLoaded: processName=${param.processName}")
         attachFrameworkLogSink()
     }
@@ -66,6 +69,9 @@ class ModuleEntry : XposedModule() {
     }
 
     override fun onSystemServerStarting(param: XposedModuleInterface.SystemServerStartingParam) {
+        systemServerProcess = true
+        runCatching { SystemLocalNetworkHooker.install(this, param.classLoader) }
+            .onFailure { Logger.warn(TAG, "SystemUI local-network hook unavailable: ${it.message}") }
         Logger.info(TAG, "onSystemServerStarting: installing NMS notification hook")
         // 钩住 NotificationManagerService 截获所有通知，验证码自动上传不再依赖 App 进程存活
         try {
@@ -77,9 +83,13 @@ class ModuleEntry : XposedModule() {
 
     override fun onHotReloading(param: XposedModuleInterface.HotReloadingParam): Boolean {
         Logger.info(TAG, "onHotReloading: tearing down old generation")
-        // 把 system_server 开机时可加载 NMS 的类加载器跨代保存，供新世代重装钩子复用
+        // 保存系统类加载器和网络权限状态，供热重载恢复。
         try {
-            SystemNotificationHooker.bootClassLoader?.let { param.setSavedInstanceState(it) }
+            if (systemServerProcess) {
+                val state = hashMapOf<String, Any>("localNetwork" to SystemLocalNetworkHooker.detachForReload())
+                SystemNotificationHooker.bootClassLoader?.let { state["bootLoader"] = it }
+                param.setSavedInstanceState(state)
+            }
         } catch (_: Throwable) {
         }
         return try {
@@ -102,11 +112,16 @@ class ModuleEntry : XposedModule() {
         attachFrameworkLogSink()
         // 生命周期回调不重放，手动重装 hook 与引擎
         GeneralHooker.onHotReloaded(this)
-        // system_server 世代：重装 NMS 通知钩子（优先复用跨代保存的加载器）
+        // 恢复 system_server 中的网络权限和通知钩子。
         if (param.isSystemServer()) {
+            systemServerProcess = true
             Logger.info(TAG, "onHotReloaded: re-installing NMS notification hook (system_server)")
             try {
-                SystemNotificationHooker.install(this, param.getSavedInstanceState() as? ClassLoader)
+                val state = param.getSavedInstanceState()
+                val saved = state as? Map<*, *>
+                val loader = saved?.get("bootLoader") as? ClassLoader ?: state as? ClassLoader
+                SystemLocalNetworkHooker.install(this, loader, saved?.get("localNetwork") as? Map<*, *>)
+                SystemNotificationHooker.install(this, loader)
             } catch (e: Throwable) {
                 Logger.error(TAG, "SystemNotificationHooker reinstall failed", e)
             }

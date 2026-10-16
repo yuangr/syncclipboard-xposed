@@ -11,6 +11,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.ImeAction
@@ -40,6 +41,7 @@ class LogActivity : BaseActivity() {
 @Composable
 fun LogScreen() {
     val context = LocalContext.current
+    val resources = LocalResources.current
     val scope = rememberCoroutineScope()
     var rawLogs by remember { mutableStateOf("") }
     var loading by remember { mutableStateOf(true) }
@@ -94,20 +96,20 @@ fun LogScreen() {
                 }
                 android.widget.Toast.makeText(
                     context,
-                    context.getString(R.string.log_export_success, fileName),
+                    resources.getString(R.string.log_export_success, fileName),
                     android.widget.Toast.LENGTH_LONG
                 ).show()
             } else {
                 android.widget.Toast.makeText(
                     context,
-                    context.getString(R.string.log_export_failed, "insert returned null"),
+                    resources.getString(R.string.log_export_failed, "insert returned null"),
                     android.widget.Toast.LENGTH_SHORT
                 ).show()
             }
         } catch (e: Exception) {
             android.widget.Toast.makeText(
                 context,
-                context.getString(R.string.log_export_failed, e.message ?: "unknown"),
+                resources.getString(R.string.log_export_failed, e.message ?: "unknown"),
                 android.widget.Toast.LENGTH_SHORT
             ).show()
         }

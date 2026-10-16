@@ -3,6 +3,7 @@ package io.github.erenche.syncclipboard.app.activity
 import android.app.Activity
 import android.content.Intent
 import android.os.Bundle
+import androidx.annotation.StringRes
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
@@ -28,6 +29,9 @@ import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import android.content.pm.PackageManager
 import io.github.erenche.syncclipboard.app.R
+import io.github.erenche.syncclipboard.app.ConfigSyncCoordinator
+import io.github.erenche.syncclipboard.bridge.LocalNetworkState
+import io.github.erenche.syncclipboard.bridge.LocalNetworkStatusPolicy
 import io.github.erenche.syncclipboard.app.compose.AppToolBarListContainer
 import io.github.erenche.syncclipboard.app.compose.preference.rememberBooleanPreference
 import io.github.erenche.syncclipboard.app.util.AppLangUtils
@@ -40,7 +44,6 @@ import io.github.erenche.syncclipboard.common.extensions.defaultSharedPreference
 import io.github.erenche.syncclipboard.common.model.AppConfig
 import io.github.erenche.syncclipboard.common.util.Logger
 import kotlinx.coroutines.launch
-import kotlinx.serialization.json.Json
 import top.yukonga.miuix.kmp.basic.Button
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.Icon
@@ -98,67 +101,96 @@ fun SettingsScreen(
     ) {
         // 1. 主题设置入口（模式 / Monet 配色 / 底栏样式均在主题页内）
         item("theme") {
-            Card(
-                modifier = Modifier
-                    .padding(start = 16.dp, top = 16.dp, end = 16.dp)
-                    .fillMaxWidth()
-            ) {
-                ArrowPreference(
-                    title = stringResource(R.string.setting_theme),
-                    summary = themeSummary(context),
-                    onClick = {
-                        context.startActivity(Intent(context, ThemeSettingsActivity::class.java))
-                    }
-                )
+            SettingsSection(R.string.setting_theme_settings) {
+                Card(modifier = Modifier.fillMaxWidth()) {
+                    ArrowPreference(
+                        title = stringResource(R.string.setting_theme),
+                        summary = themeSummary(context),
+                        onClick = {
+                            context.startActivity(Intent(context, ThemeSettingsActivity::class.java))
+                        }
+                    )
+                }
             }
         }
 
         // 2. 语言切换
         item("language") {
-            LanguageCard(context, activity)
+            SettingsSection(R.string.setting_language_settings) {
+                LanguageCard(context, activity)
+            }
         }
 
         // 3. 同步设置（含后台子开关）
         item("sync") {
-            SyncSettingsCard(context)
-        }
-
-        // 4. 历史记录设置
-        item("history") {
-            HistorySettingsCard()
-        }
-
-        // 5. 日志设置
-        item("logging") {
-            LoggingSettingsCard(context)
-        }
-
-        // 6. 自动保存设置
-        item("auto_save") {
-            AutoSaveSettingsCard(context)
-        }
-
-        // 7. 存储清理（缓存 + 引擎数据）
-        item("cache") {
-            StorageSettingsCard(context)
-        }
-
-        // 8. 关于
-        item("about") {
-            Card(
-                modifier = Modifier
-                    .padding(start = 16.dp, top = 16.dp, end = 16.dp, bottom = 16.dp)
-                    .fillMaxWidth()
-            ) {
-                ArrowPreference(
-                    title = stringResource(R.string.item_about_app),
-                    summary = stringResource(R.string.item_about_app_summary),
-                    onClick = {
-                        context.startActivity(Intent(context, AboutActivity::class.java))
-                    }
-                )
+            SettingsSection(R.string.setting_sync_settings) {
+                SyncSettingsCard(context)
             }
         }
+
+        // 4. 兼容性设置
+        item("compatibility") {
+            SettingsSection(R.string.setting_compatibility_settings) {
+                CompatibilitySettingsCard(context)
+            }
+        }
+
+        // 5. 历史记录设置
+        item("history") {
+            SettingsSection(R.string.setting_history_settings) {
+                HistorySettingsCard()
+            }
+        }
+
+        // 6. 日志设置
+        item("logging") {
+            SettingsSection(R.string.setting_logging_settings) {
+                LoggingSettingsCard(context)
+            }
+        }
+
+        // 7. 自动保存设置
+        item("auto_save") {
+            SettingsSection(R.string.setting_auto_save_settings) {
+                AutoSaveSettingsCard(context)
+            }
+        }
+
+        // 8. 存储清理（缓存 + 引擎数据）
+        item("cache") {
+            SettingsSection(R.string.setting_storage_settings) {
+                StorageSettingsCard(context)
+            }
+        }
+
+        // 9. 关于
+        item("about") {
+            SettingsSection(R.string.setting_about_settings) {
+                Card(modifier = Modifier.fillMaxWidth()) {
+                    ArrowPreference(
+                        title = stringResource(R.string.item_about_app),
+                        summary = stringResource(R.string.item_about_app_summary),
+                        onClick = {
+                            context.startActivity(Intent(context, AboutActivity::class.java))
+                        }
+                    )
+                }
+                Spacer(modifier = Modifier.height(16.dp))
+            }
+        }
+    }
+}
+
+@Composable
+private fun SettingsSection(@StringRes titleRes: Int, content: @Composable () -> Unit) {
+    Column(modifier = Modifier.padding(horizontal = 16.dp).fillMaxWidth()) {
+        Text(
+            text = stringResource(titleRes),
+            modifier = Modifier.padding(start = 12.dp, top = 16.dp, bottom = 8.dp),
+            fontSize = 14.sp,
+            color = MiuixTheme.colorScheme.onSurfaceVariantActions
+        )
+        content()
     }
 }
 
@@ -191,11 +223,7 @@ fun LanguageCard(context: android.content.Context, activity: Activity?) {
         languageCodes.indexOf(currentLanguage).coerceAtLeast(0)
     }
 
-    Card(
-        modifier = Modifier
-            .padding(start = 16.dp, top = 16.dp, end = 16.dp)
-            .fillMaxWidth()
-    ) {
+    Card(modifier = Modifier.fillMaxWidth()) {
         OverlaySpinnerPreference(
             startAction = {
                 Icon(
@@ -270,17 +298,7 @@ fun SyncSettingsCard(context: android.content.Context) {
     }
 
     fun pushConfig(newConfig: AppConfig) {
-        config = newConfig
-        try {
-            Prefs.saveConfig(context, newConfig)
-            val configJson = Json.encodeToString(AppConfig.serializer(), newConfig)
-            val payload = android.os.Bundle().apply { putString("config", configJson) }
-            SyncClipboardBridge.with(context)
-                .to("com.android.systemui")
-                .key(BridgeKeys.PUSH_CONFIG)
-                .payload(payload)
-                .send()
-        } catch (_: Exception) {}
+        if (io.github.erenche.syncclipboard.app.ConfigSyncCoordinator.save(context, newConfig)) config = newConfig
     }
 
     // 运行时权限申请 launcher（RECEIVE_SMS 是危险权限，需要运行时申请）
@@ -362,11 +380,7 @@ fun SyncSettingsCard(context: android.content.Context) {
         pushConfig(config.copy(enableVerificationCodeAutoCleanup = enabled))
     }
 
-    Card(
-        modifier = Modifier
-            .padding(start = 16.dp, top = 16.dp, end = 16.dp)
-            .fillMaxWidth()
-    ) {
+    Card(modifier = Modifier.fillMaxWidth()) {
         SwitchPreference(
             checked = autoSync,
             title = stringResource(R.string.setting_auto_sync),
@@ -494,6 +508,54 @@ fun SyncSettingsCard(context: android.content.Context) {
     }
 }
 
+// ─── 兼容性设置 ───────────────────────────────────────────────
+@Composable
+private fun CompatibilitySettingsCard(context: android.content.Context) {
+    val syncState by ConfigSyncCoordinator.state.collectAsState()
+    var config by remember(context) { mutableStateOf(Prefs.loadConfig(context)) }
+    val localNetworkSupported = LocalNetworkStatusPolicy.supported(android.os.Build.VERSION.SDK_INT)
+    DisposableEffect(context) {
+        val listener = android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+            if (key == Prefs.KEY_CONFIG) config = Prefs.loadConfig(context)
+        }
+        Prefs.registerConfigListener(context, listener)
+        onDispose { Prefs.unregisterConfigListener(context, listener) }
+    }
+
+    Card(modifier = Modifier.fillMaxWidth()) {
+        // 保留设置入口，低版本显示关闭状态并禁止操作。
+        SwitchPreference(
+            checked = localNetworkSupported && config.enableSystemUiLocalNetworkAccess,
+            enabled = localNetworkSupported,
+            title = stringResource(R.string.setting_systemui_local_network),
+            summary = stringResource(
+                if (localNetworkSupported) {
+                    R.string.setting_systemui_local_network_summary
+                } else {
+                    R.string.setting_systemui_local_network_unsupported_summary
+                }
+            ) + if (localNetworkSupported) "\n" + stringResource(when (syncState.network) {
+                LocalNetworkState.VERIFIED -> R.string.local_network_verified
+                LocalNetworkState.DISABLED -> R.string.local_network_disabled
+                LocalNetworkState.RESTART_REQUIRED -> R.string.local_network_restart_required
+                LocalNetworkState.FAILED -> R.string.local_network_failed
+                else -> R.string.local_network_waiting
+            }) else "",
+            onCheckedChange = { enabled ->
+                if (localNetworkSupported) {
+                    runCatching {
+                        // 读取最新配置，仅更新兼容性开关，避免覆盖其他分类的设置。
+                        val newConfig = Prefs.loadConfig(context).copy(enableSystemUiLocalNetworkAccess = enabled)
+                        if (io.github.erenche.syncclipboard.app.ConfigSyncCoordinator.save(context, newConfig)) {
+                            config = newConfig
+                        }
+                    }.onFailure { Logger.warn("Settings", "Failed to update LAN compatibility setting", it) }
+                }
+            }
+        )
+    }
+}
+
 // ─── 历史记录设置 ─────────────────────────────────────────────
 @Composable
 fun HistorySettingsCard() {
@@ -503,26 +565,14 @@ fun HistorySettingsCard() {
     }
 
     val onToggle: (Boolean) -> Unit = { enabled ->
-        historySync = enabled
         try {
             // 更新 AppConfig 并持久化、推送到 xposed 进程
             val config = Prefs.loadConfig(context).copy(enableHistorySync = enabled)
-            Prefs.saveConfig(context, config)
-            val configJson = Json.encodeToString(AppConfig.serializer(), config)
-            val payload = android.os.Bundle().apply { putString("config", configJson) }
-            SyncClipboardBridge.with(context)
-                .to("com.android.systemui")
-                .key(BridgeKeys.PUSH_CONFIG)
-                .payload(payload)
-                .send()
+            if (ConfigSyncCoordinator.save(context, config)) historySync = enabled
         } catch (_: Exception) {}
     }
 
-    Card(
-        modifier = Modifier
-            .padding(start = 16.dp, top = 16.dp, end = 16.dp)
-            .fillMaxWidth()
-    ) {
+    Card(modifier = Modifier.fillMaxWidth()) {
         SwitchPreference(
             checked = historySync,
             title = stringResource(R.string.setting_history_sync),
@@ -554,31 +604,23 @@ fun LoggingSettingsCard(context: android.content.Context) {
 
     fun pushConfig(newConfig: AppConfig) {
         try {
-            Prefs.saveConfig(context, newConfig)
+            if (!io.github.erenche.syncclipboard.app.ConfigSyncCoordinator.save(context, newConfig)) return
+            enableLogging = newConfig.enableLogging
+            logLevel = newConfig.logLevel
+            logBufferSize = newConfig.logBufferSize
             Logger.enabled = newConfig.enableLogging
             Logger.logLevel = newConfig.logLevel
             Logger.maxBufferSize = newConfig.logBufferSize
-            val configJson = Json.encodeToString(AppConfig.serializer(), newConfig)
-            val payload = android.os.Bundle().apply { putString("config", configJson) }
-            SyncClipboardBridge.with(context)
-                .to("com.android.systemui")
-                .key(BridgeKeys.PUSH_CONFIG)
-                .payload(payload)
-                .send()
+
         } catch (_: Exception) {}
     }
 
-    Card(
-        modifier = Modifier
-            .padding(start = 16.dp, top = 16.dp, end = 16.dp)
-            .fillMaxWidth()
-    ) {
+    Card(modifier = Modifier.fillMaxWidth()) {
         SwitchPreference(
             checked = enableLogging,
             title = stringResource(R.string.setting_enable_logging),
             summary = stringResource(R.string.setting_enable_logging_summary),
             onCheckedChange = { enabled ->
-                enableLogging = enabled
                 pushConfig(Prefs.loadConfig(context).copy(enableLogging = enabled))
             }
         )
@@ -598,7 +640,6 @@ fun LoggingSettingsCard(context: android.content.Context) {
                     selectedIndex = selectedLevelIndex,
                     onSelectedIndexChange = { index ->
                         val newLevel = levelOptions[index]
-                        logLevel = newLevel
                         pushConfig(Prefs.loadConfig(context).copy(logLevel = newLevel))
                     }
                 )
@@ -616,7 +657,6 @@ fun LoggingSettingsCard(context: android.content.Context) {
             selectedIndex = selectedBufferIndex,
             onSelectedIndexChange = { index ->
                 val newSize = bufferOptions[index]
-                logBufferSize = newSize
                 pushConfig(Prefs.loadConfig(context).copy(logBufferSize = newSize))
             }
         )
@@ -631,25 +671,13 @@ fun AutoSaveSettingsCard(context: android.content.Context) {
     }
 
     val onToggle: (Boolean) -> Unit = { enabled ->
-        enableAutoSave = enabled
         try {
             val config = Prefs.loadConfig(context).copy(enableAutoSave = enabled)
-            Prefs.saveConfig(context, config)
-            val configJson = Json.encodeToString(AppConfig.serializer(), config)
-            val payload = android.os.Bundle().apply { putString("config", configJson) }
-            SyncClipboardBridge.with(context)
-                .to("com.android.systemui")
-                .key(BridgeKeys.PUSH_CONFIG)
-                .payload(payload)
-                .send()
+            if (ConfigSyncCoordinator.save(context, config)) enableAutoSave = enabled
         } catch (_: Exception) {}
     }
 
-    Card(
-        modifier = Modifier
-            .padding(start = 16.dp, top = 16.dp, end = 16.dp)
-            .fillMaxWidth()
-    ) {
+    Card(modifier = Modifier.fillMaxWidth()) {
         SwitchPreference(
             checked = enableAutoSave,
             title = stringResource(R.string.setting_auto_save),
@@ -680,11 +708,7 @@ fun StorageSettingsCard(context: android.content.Context) {
 
     LaunchedEffect(Unit) { engineSize = queryEngineSize() }
 
-    Card(
-        modifier = Modifier
-            .padding(start = 16.dp, top = 16.dp, end = 16.dp)
-            .fillMaxWidth()
-    ) {
+    Card(modifier = Modifier.fillMaxWidth()) {
         // 清理缓存（app 侧预览文件等，无害操作）
         Row(
             modifier = Modifier

@@ -7,6 +7,8 @@ import io.github.erenche.syncclipboard.common.model.DEFAULT_APP_CONFIG
 import io.github.erenche.syncclipboard.common.model.ProfileDto
 import io.github.erenche.syncclipboard.common.model.ServerConfig
 import io.github.erenche.syncclipboard.common.util.Logger
+import io.github.erenche.syncclipboard.common.security.PreferenceEncryption
+import io.github.erenche.syncclipboard.common.security.EncryptedValueStore
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.encodeToString
 
@@ -22,6 +24,7 @@ object Prefs {
      * from a freshly installed/cleared app that has never owned a configuration.
      */
     private const val KEY_CONFIG_INITIALIZED = "config_initialized"
+    private const val KEY_CONFIG_REVISION = "config_revision"
     private const val KEY_SERVERS = "servers"
     private const val KEY_ACTIVE_SERVER = "active_server_index"
     private const val KEY_HISTORY_LAST_SYNC_TIME = "history_last_sync_time"
@@ -30,35 +33,73 @@ object Prefs {
     private const val KEY_LAST_REMOTE_PROFILE = "last_remote_profile"
 
     private val json = Json { ignoreUnknownKeys = true; prettyPrint = false }
+    @Volatile var configStorageError: Boolean = false
+        private set
 
     /**
      * 从 SharedPreferences 加载配置
      */
+    @Synchronized
     fun loadConfig(context: Context): AppConfig {
-        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        val configJson = prefs.getString(KEY_CONFIG, null)
-        return if (configJson != null) {
-            try {
-                json.decodeFromString<AppConfig>(configJson)
-            } catch (e: Exception) {
-                Logger.warn("Prefs", "Failed to parse config, using default", e)
-                DEFAULT_APP_CONFIG
-            }
-        } else {
-            // 兼容旧格式：从独立 key 迁移
-            migrateLegacyConfig(prefs)
+        return try {
+            val prefs = getPrefs(context)
+            val raw = prefs.getString(KEY_CONFIG, null)
+            val config = if (raw != null) {
+                var decoded: AppConfig? = null
+                encryptedStore(prefs).load(KEY_CONFIG) { decoded = json.decodeFromString<AppConfig>(it) }
+                requireNotNull(decoded)
+            } else migrateLegacyConfig(prefs)
+            configStorageError = false
+            config
+        } catch (e: Exception) {
+            // 保留原配置；停止同步，避免错误默认值覆盖凭据。
+            configStorageError = true
+            Logger.warn("Prefs", "Config storage unavailable: ${e.javaClass.simpleName}")
+            DEFAULT_APP_CONFIG.copy(enableAutoSync = false, enableBackgroundUpload = false,
+                enableBackgroundDownload = false, enableSystemUiLocalNetworkAccess = false)
         }
     }
 
     /**
      * 保存配置到 SharedPreferences
      */
+    @Synchronized
     fun saveConfig(context: Context, config: AppConfig) {
-        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        prefs.edit()
-            .putString(KEY_CONFIG, json.encodeToString(config))
-            .putBoolean(KEY_CONFIG_INITIALIZED, true)
-            .apply()
+
+        loadConfig(context)
+        check(!configStorageError) { "Config storage unavailable; original data retained" }
+        try {
+            persistConfig(getPrefs(context), config)
+        } catch (e: Exception) {
+            configStorageError = true
+            throw e
+        }
+    }
+
+    private fun persistConfig(prefs: SharedPreferences, config: AppConfig) {
+        encryptedStore(prefs).save(KEY_CONFIG, json.encodeToString(config))
+    }
+
+    private fun encryptedStore(prefs: SharedPreferences) = EncryptedValueStore(
+        PreferenceEncryption.codec, { key -> prefs.getString(key, null) }, { key, value ->
+            val editor = prefs.edit()
+            if (value == null) editor.remove(key) else editor.putString(key, value)
+            if (key == KEY_CONFIG) {
+                val revision = maxOf(System.currentTimeMillis(), prefs.getLong(KEY_CONFIG_REVISION, 0L) + 1)
+                editor.putLong(KEY_CONFIG_REVISION, revision)
+                    .putBoolean(KEY_CONFIG_INITIALIZED, true)
+                    .remove(KEY_SERVERS)
+                    .remove(KEY_ACTIVE_SERVER)
+            }
+            editor.commit()
+        })
+
+    fun configRevision(context: Context): Long = getPrefs(context).getLong(KEY_CONFIG_REVISION, 0L)
+
+    @Synchronized
+    fun configSnapshot(context: Context): Pair<AppConfig, Long> {
+        val config = loadConfig(context)
+        return config to if (configStorageError) 0L else configRevision(context)
     }
 
     /** Whether this process has explicitly persisted a configuration. */
@@ -85,27 +126,16 @@ object Prefs {
         val serversJson = prefs.getString(KEY_SERVERS, null)
         val activeIndex = prefs.getInt(KEY_ACTIVE_SERVER, -1)
 
-        val servers: List<ServerConfig> = if (serversJson != null) {
-            try {
-                json.decodeFromString<List<ServerConfig>>(serversJson)
-            } catch (e: Exception) {
-                emptyList()
-            }
-        } else {
-            emptyList()
-        }
+        val servers: List<ServerConfig> = serversJson?.let {
+            json.decodeFromString<List<ServerConfig>>(it)
+        } ?: emptyList()
 
         val config = DEFAULT_APP_CONFIG.copy(
             servers = servers,
             activeServerIndex = activeIndex
         )
 
-        // 保存为新格式
-        prefs.edit()
-            .putString(KEY_CONFIG, json.encodeToString(config))
-            .remove(KEY_SERVERS)
-            .remove(KEY_ACTIVE_SERVER)
-            .apply()
+        persistConfig(prefs, config)
 
         return config
     }
@@ -115,6 +145,27 @@ object Prefs {
      */
     fun getPrefs(context: Context): SharedPreferences {
         return context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+    }
+
+    /** 旧明文仅在加密落盘成功后替换。 */
+    @Synchronized
+    fun loadSensitiveString(context: Context, key: String): String? {
+        return encryptedStore(getPrefs(context)).load(key)
+    }
+
+    @Synchronized
+    fun saveSensitiveString(context: Context, key: String, value: String?) {
+        encryptedStore(getPrefs(context)).save(key, value)
+    }
+
+    /** 同时迁移闲置服务器的队列，旧无归属队列仍不重放。 */
+    fun migrateSensitiveValues(context: Context) {
+        getPrefs(context).all.keys.filter {
+            it == KEY_LAST_REMOTE_PROFILE || it == "upload_queue" || it.startsWith("upload_queue:")
+        }.forEach { key ->
+            runCatching { loadSensitiveString(context, key) }
+                .onFailure { Logger.warn("Prefs", "Sensitive value migration pending: ${it.javaClass.simpleName}") }
+        }
     }
 
     /**
@@ -171,11 +222,11 @@ object Prefs {
      * 加载缓存的最新 profile（引擎重启后恢复，app 无需等网络拉取即可显示上次内容）
      */
     fun loadLastRemoteProfile(context: Context): ProfileDto? {
-        val profileJson = getPrefs(context).getString(KEY_LAST_REMOTE_PROFILE, null) ?: return null
         return try {
+            val profileJson = loadSensitiveString(context, KEY_LAST_REMOTE_PROFILE) ?: return null
             json.decodeFromString(ProfileDto.serializer(), profileJson)
         } catch (e: Exception) {
-            Logger.warn("Prefs", "Failed to parse last remote profile", e)
+            Logger.warn("Prefs", "Cached profile unavailable: ${e.javaClass.simpleName}")
             null
         }
     }
@@ -184,12 +235,7 @@ object Prefs {
      * 保存缓存的最新 profile（null 清除）
      */
     fun saveLastRemoteProfile(context: Context, profile: ProfileDto?) {
-        val editor = getPrefs(context).edit()
-        if (profile == null) {
-            editor.remove(KEY_LAST_REMOTE_PROFILE)
-        } else {
-            editor.putString(KEY_LAST_REMOTE_PROFILE, json.encodeToString(ProfileDto.serializer(), profile))
-        }
-        editor.apply()
+        saveSensitiveString(context, KEY_LAST_REMOTE_PROFILE,
+            profile?.let { json.encodeToString(ProfileDto.serializer(), it) })
     }
 }

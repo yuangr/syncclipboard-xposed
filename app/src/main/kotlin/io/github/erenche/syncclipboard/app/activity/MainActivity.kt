@@ -68,7 +68,6 @@ import io.github.erenche.syncclipboard.bridge.SyncClipboardBridge
 import io.github.erenche.syncclipboard.common.Prefs
 import io.github.erenche.syncclipboard.common.model.AppConfig
 import io.github.erenche.syncclipboard.common.model.ClipboardContentType
-import kotlinx.serialization.json.Json
 import top.yukonga.miuix.kmp.basic.*
 import top.yukonga.miuix.kmp.blur.layerBackdrop
 import top.yukonga.miuix.kmp.blur.rememberLayerBackdrop
@@ -94,6 +93,7 @@ class MainActivity : BaseActivity(), SyncClipboardApp.XposedServiceStateListener
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        io.github.erenche.syncclipboard.app.ConfigSyncCoordinator.retry()
         val localNetworkPermission = "android.permission.ACCESS_LOCAL_NETWORK"
         if (checkSelfPermission(localNetworkPermission) != PackageManager.PERMISSION_GRANTED) {
             requestPermissions(arrayOf(localNetworkPermission), 1001)
@@ -166,34 +166,23 @@ private val bottomTabs = listOf(
 fun MainScreen(viewModel: MainViewModel) {
     val context = LocalContext.current
 
-    // Recover a SystemUI-only configuration after an app-data clear before any
-    // push.  App and engine preferences intentionally live in different UIDs.
+    // 启动时向 SystemUI 同步配置；若 App 数据被清空，先尝试从 SystemUI 恢复已配置的服务器。
     LaunchedEffect(Unit) {
-        var configToPush = Prefs.loadConfig(context).takeIf { Prefs.isConfigInitialized(context) }
-        try {
-            val reply = SyncClipboardBridge.with(context)
-                .to("com.android.systemui")
-                .key(BridgeKeys.GET_CONFIG)
-                .await()
-            val engineConfig = reply.getString("config")?.let {
-                runCatching { Json.decodeFromString(AppConfig.serializer(), it) }.getOrNull()
-            }
-            if (!Prefs.isConfigInitialized(context) && engineConfig?.servers?.isNotEmpty() == true) {
-                Prefs.saveConfig(context, engineConfig)
-                configToPush = engineConfig
-            }
-        } catch (_: Exception) {}
-        configToPush?.let { config ->
-            runCatching {
-                val configJson = Json.encodeToString(AppConfig.serializer(), config)
-                val payload = android.os.Bundle().apply { putString("config", configJson) }
-                SyncClipboardBridge.with(context)
+        if (!Prefs.isConfigInitialized(context)) {
+            try {
+                val reply = SyncClipboardBridge.with(context)
                     .to("com.android.systemui")
-                    .key(BridgeKeys.PUSH_CONFIG)
-                    .payload(payload)
-                    .send()
-            }
+                    .key(BridgeKeys.GET_CONFIG)
+                    .await(3000)
+                val engineConfig = reply.getString("config")?.let {
+                    runCatching { kotlinx.serialization.json.Json.decodeFromString(AppConfig.serializer(), it) }.getOrNull()
+                }
+                if (engineConfig?.servers?.isNotEmpty() == true) {
+                    Prefs.saveConfig(context, engineConfig)
+                }
+            } catch (_: Exception) {}
         }
+        io.github.erenche.syncclipboard.app.ConfigSyncCoordinator.retry()
         viewModel.refreshRemoteContent()
         viewModel.checkUpdate()
     }
@@ -202,7 +191,7 @@ fun MainScreen(viewModel: MainViewModel) {
     DisposableEffect(Unit) {
         val receiver = object : BroadcastReceiver() {
             override fun onReceive(context: Context, intent: Intent) {
-                if (!BridgeSecurity.isTrustedSender(context)) return
+                if (!BridgeSecurity.isTrustedSender(context, this, BridgeSecurity.PERMISSION_SYSTEM_EVENT)) return
                 viewModel.refreshRemoteContentCache()
             }
         }
@@ -210,6 +199,7 @@ fun MainScreen(viewModel: MainViewModel) {
             context,
             receiver,
             IntentFilter(BridgeKeys.EVENT_CLIPBOARD_CHANGED),
+            BridgeSecurity.PERMISSION_SYSTEM_EVENT, null,
             ContextCompat.RECEIVER_EXPORTED
         )
         onDispose { context.unregisterReceiver(receiver) }

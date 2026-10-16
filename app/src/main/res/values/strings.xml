@@ -3,13 +3,13 @@
     <string name="app_name">SyncClipboard</string>
     <string name="app_description">LSPosed module for silent clipboard sync</string>
 
-    <!-- Activities -->
+    <!-- 页面 -->
     <string name="activity_settings">Settings</string>
     <string name="activity_server_config">Server Configuration</string>
     <string name="activity_history">Clipboard History</string>
     <string name="activity_about">About</string>
 
-    <!-- Module Status -->
+    <!-- 模块状态 -->
     <string name="module_status_activated">Module Activated</string>
     <string name="module_status_not_activated">Module Not Activated</string>
     <string name="module_status_connecting">Connecting…</string>
@@ -17,7 +17,7 @@
     <string name="module_status_system_ui_safe_mode">System UI safe mode — hooks disabled</string>
     <string name="module_status_summary">Version %s</string>
 
-    <!-- Actions -->
+    <!-- 操作 -->
     <string name="action_restart">Restart</string>
     <string name="action_sync_now">Sync Now</string>
     <string name="action_upload_now">Upload Now</string>
@@ -43,14 +43,14 @@
     <string name="action_confirm">OK</string>
     <string name="action_copy">Copy</string>
 
-    <!-- Restart -->
+    <!-- 重启 -->
     <string name="restart_system_ui">Restart System UI</string>
     <string name="restart_app">Restart App</string>
     <string name="restart_fail">Restart Failed</string>
     <string name="message_app_restart_fail">Failed to restart. Please try manually.</string>
     <string name="ok">OK</string>
 
-    <!-- Server Config -->
+    <!-- 服务器配置 -->
     <string name="server_type_syncclipboard">SyncClipboard Server</string>
     <string name="server_type_webdav">WebDAV</string>
     <string name="server_type_s3">S3 Compatible</string>
@@ -71,6 +71,10 @@
     <string name="server_delete">Delete Server</string>
     <string name="server_delete_confirm">Delete server \"%s\"?</string>
     <string name="server_test_success">Connection successful</string>
+    <string name="server_test_protocol_success">Authentication and protocol checks passed (read-only)</string>
+    <string name="server_test_timeout">Connection test timed out</string>
+    <string name="server_test_engine_unavailable">No response; check module scopes and restart SystemUI</string>
+    <string name="server_test_process_results">App: %1$s\nSystemUI: %2$s</string>
     <string name="server_updated">Server updated</string>
     <string name="server_added">Server added</string>
     <string name="server_test_fail">Connection failed</string>
@@ -100,7 +104,7 @@
     <string name="server_bucket_hint">my-bucket</string>
     <string name="server_prefix_hint">syncclipboard/</string>
 
-    <!-- Theme -->
+    <!-- 主题 -->
     <string name="setting_theme">Theme</string>
     <string name="setting_theme_mode">Theme Mode</string>
     <string name="setting_blur">Blur</string>
@@ -144,7 +148,13 @@
     <string name="option_theme_light">Light</string>
     <string name="option_theme_dark">Dark</string>
 
-    <!-- Sync Settings -->
+    <!-- 兼容性设置 -->
+    <string name="setting_compatibility_settings">Compatibility Settings</string>
+    <string name="setting_systemui_local_network">SystemUI LAN access compatibility</string>
+    <string name="setting_systemui_local_network_summary">Allow SystemUI to connect to local servers on Android 17 or later, independently of auto sync. Requires the module in the Android system scope and a device reboot after installation. Applies to the entire SystemUI UID.</string>
+    <string name="setting_systemui_local_network_unsupported_summary">Requires Android 17 (API 37) or later. Unavailable on this system.</string>
+
+    <!-- 同步设置 -->
     <string name="setting_auto_sync">Auto Sync</string>
     <string name="setting_auto_sync_summary">Sync clipboard in background</string>
     <string name="setting_background_upload">Background Upload</string>
@@ -187,10 +197,16 @@
     <string name="setting_verification_code_auto_cleanup">Auto-delete Uploaded Codes</string>
     <string name="setting_verification_code_auto_cleanup_summary">Delete the history entry 60 seconds after a code is uploaded and sync the deletion to the server</string>
     <string name="setting_language">Language</string>
+    <string name="setting_language_settings">Language Settings</string>
     <string name="setting_language_auto">Follow system</string>
     <string name="setting_language_zh">中文</string>
     <string name="setting_language_en">English</string>
     <string name="setting_sync_settings">Sync Settings</string>
+    <string name="setting_theme_settings">Appearance Settings</string>
+    <string name="setting_logging_settings">Logging Settings</string>
+    <string name="setting_auto_save_settings">Auto-save Settings</string>
+    <string name="setting_storage_settings">Storage Settings</string>
+    <string name="setting_about_settings">About</string>
     <string name="setting_background_settings">Background Settings</string>
     <string name="setting_history_settings">History Settings</string>
     <string name="setting_cache">Cache</string>
@@ -198,7 +214,7 @@
     <string name="setting_cache_cleared">Cache cleared</string>
     <string name="setting_cache_clear">Clear</string>
 
-    <!-- Items -->
+    <!-- 条目 -->
     <string name="item_server_settings">Server Configuration</string>
     <string name="item_server_settings_summary">Add and manage sync servers</string>
     <string name="item_sync_settings">Settings</string>
@@ -226,27 +242,27 @@
     <string name="item_about_app">About</string>
     <string name="item_about_app_summary">Version and license info</string>
 
-    <!-- Content Types -->
+    <!-- 内容类型 -->
     <string name="type_text">Text</string>
     <string name="type_image">Image</string>
     <string name="type_file">File</string>
     <string name="type_group">Group</string>
 
-    <!-- Remote Content -->
+    <!-- 远程内容 -->
     <string name="main_remote_content">Server Latest Content</string>
     <string name="main_loading">Loading…</string>
     <string name="main_no_content">No content available</string>
 
-    <!-- Sync Status -->
+    <!-- 同步状态 -->
     <string name="sync_status_running">Running</string>
     <string name="sync_status_stopped">Stopped</string>
     <string name="sync_status_checking">Checking…</string>
     <string name="sync_status_unavailable">Unavailable</string>
 
-    <!-- Quick Settings Tile -->
+    <!-- 快捷设置磁贴 -->
     <string name="tile_auto_sync">Clipboard Sync</string>
 
-    <!-- History -->
+    <!-- 历史记录 -->
     <string name="history_empty">No clipboard history yet</string>
     <string name="history_copy">Copy to clipboard</string>
     <string name="history_delete">Delete</string>
@@ -265,8 +281,8 @@
     <string name="history_page_next">Next</string>
     <string name="history_page_indicator">Page %1$d / %2$d</string>
     <string name="history_page_size">Per page</string>
-    <string name="history_page_size_50">50</string>
-    <string name="history_page_size_100">100</string>
+    <string name="history_page_size_50" translatable="false">50</string>
+    <string name="history_page_size_100" translatable="false">100</string>
     <string name="history_total_count">Total %d items</string>
     <string name="history_selected_count">%d selected</string>
     <string name="history_delete_selected">Delete (%d)</string>
@@ -304,7 +320,7 @@
     <string name="transfer_added_single">Added to transfer queue</string>
     <string name="transfer_menu_with_count">Transfers (%1$d)</string>
 
-    <!-- About -->
+    <!-- 关于 -->
     <string name="about_version">Version %s</string>
     <string name="about_description">An LSPosed module for silent clipboard synchronization between devices.</string>
     <string name="about_supported_backends">Supports SyncClipboard Server, WebDAV, and S3-compatible storage backends.</string>
@@ -338,16 +354,24 @@
     <string name="oss_androidx">AndroidX / Jetpack Compose</string>
     <string name="oss_androidx_license">Apache 2.0</string>
 
-    <!-- Main Screen -->
+    <!-- 主界面 -->
     <string name="main_sync_status">Sync Status: %s</string>
     <string name="main_sync_now_desc">Manually trigger clipboard sync</string>
     <string name="main_upload_now_desc">Push current clipboard to server</string>
     <string name="main_how_it_works_title">How it works</string>
     <string name="main_how_it_works_text">This LSPosed module hooks into ClipboardManager to detect clipboard changes instantly without polling. Changes are synced to your configured server (SyncClipboard, WebDAV, or S3).</string>
 
-    <!-- Language codes array -->
+    <!-- 语言代码列表 -->
     <string-array name="language_codes">
         <item>zh</item>
         <item>en</item>
     </string-array>
+    <string name="config_pending">Settings saved; application not confirmed. Retrying; check module activation.</string>
+    <string name="config_storage_error">Cannot read or save settings. Unlock and retry; do not clear app data.</string>
+    <string name="local_network_verified">Kernel permission verified. This does not guarantee server connectivity.</string>
+    <string name="local_network_disabled">Compatibility override is disabled and restoration is verified.</string>
+    <string name="local_network_restart_required">System service did not respond. Check Android scope in LSPosed and reboot.</string>
+    <string name="local_network_waiting">Waiting for a supported framework permission interface and its writer thread.</string>
+    <string name="local_network_failed">Could not save the compatibility setting or verify the kernel permission. Retrying automatically; check module logs.</string>
+    <string name="config_remote_storage_error">SystemUI cannot save settings. Original data is retained; retrying automatically.</string>
 </resources>

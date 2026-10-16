@@ -5,6 +5,7 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import androidx.core.content.ContextCompat
 import androidx.compose.runtime.State
 import androidx.compose.runtime.mutableStateOf
 import androidx.lifecycle.AndroidViewModel
@@ -73,7 +74,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val resultReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             intent ?: return
-            if (context != null && !BridgeSecurity.isTrustedSender(context)) return
+            if (context == null || !BridgeSecurity.isTrustedSender(context, this, BridgeSecurity.PERMISSION_SYSTEM_EVENT)) return
             when (intent.action) {
                 BridgeKeys.EVENT_ACTION_RESULT -> {
                     val action = intent.getStringExtra("action") ?: return
@@ -99,11 +100,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             addAction(BridgeKeys.EVENT_ACTION_RESULT)
             addAction(BridgeKeys.EVENT_SYNC_STATE_CHANGED)
         }
-        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
-            app.registerReceiver(resultReceiver, filter, Context.RECEIVER_EXPORTED)
-        } else {
-            app.registerReceiver(resultReceiver, filter)
-        }
+        ContextCompat.registerReceiver(app, resultReceiver, filter,
+            BridgeSecurity.PERMISSION_SYSTEM_EVENT, null, ContextCompat.RECEIVER_EXPORTED)
         refreshStatus()
     }
 

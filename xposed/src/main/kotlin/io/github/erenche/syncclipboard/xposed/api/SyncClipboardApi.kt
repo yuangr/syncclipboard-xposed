@@ -15,7 +15,7 @@ import io.github.erenche.syncclipboard.common.model.ProfileDto
  * 注意：历史记录 API（queryHistoryRecords / uploadHistoryRecord）仅
  * SyncClipboard HTTP 服务器支持，WebDAV/S3 客户端返回空结果或不执行操作。
  */
-interface SyncClipboardApi {
+interface SyncClipboardApi : java.io.Closeable {
 
     /** 获取远程剪贴板配置 */
     suspend fun getClipboard(): ProfileDto?
@@ -27,8 +27,8 @@ interface SyncClipboardApi {
     suspend fun downloadFile(
         fileName: String,
         destinationPath: String,
-        onProgress: ((Float) -> Unit)? = null,
-        maxBytes: Long = Long.MAX_VALUE
+        maxBytes: Long = Long.MAX_VALUE,
+        onProgress: ((Float) -> Unit)? = null
     ): String
 
     /** 上传文件。

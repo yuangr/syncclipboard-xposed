@@ -11,9 +11,8 @@ import io.github.erenche.syncclipboard.common.util.Logger
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.cancelChildren
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeout
 import java.util.concurrent.ConcurrentHashMap
@@ -67,9 +66,8 @@ object SyncClipboardBridge {
         override fun onReceive(context: Context, intent: Intent) {
             if (intent.action != ACTION_IPC) return
 
-            // D 方案：调用方 UID 校验 — 仅允许本 App 或 SystemUI 进程调用
-            if (!BridgeSecurity.isTrustedSender(context)) {
-                Logger.warn(TAG, "Reject IPC from uid=${android.os.Binder.getCallingUid()}")
+            if (!BridgeSecurity.isTrustedSender(context, this, PERMISSION_BRIDGE)) {
+                Logger.warn(TAG, "Reject untrusted IPC sender")
                 return
             }
 
@@ -88,7 +86,7 @@ object SyncClipboardBridge {
                     result = r
                     callback.onReply(r)
                 } catch (e: Exception) {
-                    Logger.warn(TAG, "Bridge handler error for key=$key: ${e.message}")
+                    Logger.warn(TAG, "Bridge handler error for key=$key: ${io.github.erenche.syncclipboard.common.util.SafeDiagnostics.failure(e)}")
                     try {
                         callback.onReply(Bundle.EMPTY)
                     } catch (_: Exception) {
@@ -143,7 +141,7 @@ object SyncClipboardBridge {
             registeredContext = null
             isInitialized = false
         }
-        bridgeScope.coroutineContext[Job]?.cancelChildren()
+        bridgeScope.cancel()
         bridgeScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
         handlers.clear()
         Logger.info(TAG, "Bridge torn down")
@@ -179,7 +177,7 @@ object SyncClipboardBridge {
                 Logger.debug(TAG, "Handler result for key=$key, isEmpty=${result.isEmpty}, running=${result.getBoolean("running", false)}")
                 onReply(result)
             } catch (e: Exception) {
-                Logger.error(TAG, "Handler error for key=$key", e)
+                Logger.error(TAG, "Handler error for key=$key")
                 onReply(Bundle.EMPTY)
             }
         }
@@ -221,14 +219,20 @@ object SyncClipboardBridge {
         fun onQuery(key: String, action: suspend QueryScope.() -> Unit) {
             handlers[key] = { data ->
                 val deferred = CompletableDeferred<Bundle>()
-                val scope = QueryScope(data, deferred)
+                val resources = ReplyResourceGuard<Bundle>(::closeParcelFileDescriptors)
+                val scope = QueryScope(data, deferred, resources)
                 try {
-                    scope.action()
-                } catch (e: Throwable) {
-                    // reply 之后仍抛异常：结果已产生则照常返回（其中 FD 由 bridge 统一关闭）
-                    if (!deferred.isCompleted) throw e
+                    try {
+                        scope.action()
+                    } catch (e: Throwable) {
+                        // 已回复的结果继续交付，未交付资源由守卫回收。
+                        if (!deferred.isCompleted) throw e
+                    }
+                    resources.claim(deferred.await())
+                } finally {
+                    deferred.cancel()
+                    resources.close()
                 }
-                deferred.await()
             }
         }
     }
@@ -236,17 +240,16 @@ object SyncClipboardBridge {
     /**
      * 查询上下文作用域 — 持有请求数据并提供 reply 方法
      */
-    class QueryScope(
+    class QueryScope internal constructor(
         val data: Bundle,
-        private val deferred: CompletableDeferred<Bundle>
+        private val deferred: CompletableDeferred<Bundle>,
+        private val resources: ReplyResourceGuard<Bundle>
     ) {
         /**
          * 显式回传结果并恢复挂起的处理器。
          */
         fun reply(bundle: Bundle) {
-            if (deferred.isActive) {
-                deferred.complete(bundle)
-            }
+            resources.offer(bundle) { deferred.complete(bundle) }
         }
     }
 
@@ -282,19 +285,21 @@ object SyncClipboardBridge {
          */
         suspend fun await(timeout: Long = 3000): Bundle {
             val deferred = CompletableDeferred<Bundle>()
+            val resources = ReplyResourceGuard<Bundle>(::closeParcelFileDescriptors)
             return try {
-                withTimeout(timeout) {
+                val result = withTimeout(timeout) {
                     executeInternal { bundle ->
-                        if (!deferred.complete(bundle)) {
-                            // 等待方已超时放弃：关闭包内 FD，防本进程泄露
-                            closeParcelFileDescriptors(bundle)
-                        }
+                        resources.offer(bundle) { deferred.complete(bundle) }
                     }
                     deferred.await()
                 }
+                resources.claim(result)
             } catch (e: kotlinx.coroutines.TimeoutCancellationException) {
-                deferred.cancel()
                 Bundle.EMPTY
+            } finally {
+                // 超时和外部取消均关闭等待入口，迟到的文件描述符由回调回收。
+                deferred.cancel()
+                resources.close()
             }
         }
 
@@ -331,11 +336,13 @@ object SyncClipboardBridge {
                 putBundle(EXTRA_PAYLOAD, data)
                 putBinder(EXTRA_CALLBACK, object : IBridgeCallback.Stub() {
                     override fun onReply(res: Bundle) {
-                        onReplyAction?.invoke(res)
+                        if (BridgeSecurity.isTrustedCallback(context, targetPkg) && onReplyAction != null) {
+                            onReplyAction.invoke(res)
+                        } else closeParcelFileDescriptors(res)
                     }
                 })
             }
-            context.sendBroadcast(intent.putExtras(bundle))
+            BridgeSecurity.sendBroadcast(context, intent.putExtras(bundle))
         }
     }
 }

@@ -46,6 +46,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.text.input.TextFieldValue
@@ -144,6 +145,7 @@ fun HistoryScreen(
     active: Boolean = true,
 ) {
     val context = LocalContext.current
+    val resources = LocalResources.current
     val activity = context as? Activity
     val scope = rememberCoroutineScope()
 
@@ -377,7 +379,7 @@ fun HistoryScreen(
         // 剪贴板变化：刷新列表
         val receiver = object : BroadcastReceiver() {
             override fun onReceive(ctx: Context, intent: Intent) {
-                if (!BridgeSecurity.isTrustedSender(ctx)) return
+                if (!BridgeSecurity.isTrustedSender(ctx, this, BridgeSecurity.PERMISSION_SYSTEM_EVENT)) return
                 if (intent.action == BridgeKeys.EVENT_CLIPBOARD_CHANGED) {
                     scope.launch { loadHistoryPage(currentPage) }
                 }
@@ -387,6 +389,7 @@ fun HistoryScreen(
         ContextCompat.registerReceiver(
             context, receiver,
             filter,
+            BridgeSecurity.PERMISSION_SYSTEM_EVENT, null,
             ContextCompat.RECEIVER_EXPORTED
         )
         onDispose { context.unregisterReceiver(receiver) }
@@ -396,7 +399,7 @@ fun HistoryScreen(
     DisposableEffect(Unit) {
         val receiver = object : BroadcastReceiver() {
             override fun onReceive(ctx: Context, intent: Intent) {
-                if (!BridgeSecurity.isTrustedSender(ctx)) return
+                if (!BridgeSecurity.isTrustedSender(ctx, this, BridgeSecurity.PERMISSION_SYSTEM_EVENT)) return
                 scope.launch { loadHistoryPage(currentPage) }
                 val success = intent.getBooleanExtra("success", false)
                 if (success) {
@@ -416,6 +419,7 @@ fun HistoryScreen(
         ContextCompat.registerReceiver(
             context, receiver,
             IntentFilter(BridgeKeys.EVENT_HISTORY_SYNC_COMPLETED),
+            BridgeSecurity.PERMISSION_SYSTEM_EVENT, null,
             ContextCompat.RECEIVER_EXPORTED
         )
         onDispose { context.unregisterReceiver(receiver) }
@@ -525,7 +529,7 @@ fun HistoryScreen(
                                 selectedIds = emptySet()
                                 Toast.makeText(
                                     context,
-                                    context.getString(R.string.transfer_added, selected.size),
+                                    resources.getString(R.string.transfer_added, selected.size),
                                     Toast.LENGTH_SHORT
                                 ).show()
                             },

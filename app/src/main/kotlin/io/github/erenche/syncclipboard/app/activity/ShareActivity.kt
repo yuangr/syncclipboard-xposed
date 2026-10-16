@@ -35,6 +35,7 @@ import io.github.erenche.syncclipboard.bridge.SyncClipboardBridge
 import io.github.erenche.syncclipboard.common.PackageNames
 import io.github.erenche.syncclipboard.common.Prefs
 import io.github.erenche.syncclipboard.common.model.ClipboardContent
+import io.github.erenche.syncclipboard.common.model.storageKey
 import io.github.erenche.syncclipboard.common.model.ClipboardContentType
 import io.github.erenche.syncclipboard.common.util.Logger
 import io.github.erenche.syncclipboard.xposed.api.ClientFactory
@@ -220,14 +221,17 @@ class ShareActivity : BaseActivity() {
                 pendingFiles[item.transferId] = p.localFile
             }
             // 逐文件串行上传，进度实时更新本地状态
-            prepared.zip(items).forEach { (p, item) ->
-                uploadFile(api, item, p.localFile)
+            val serverKey = requireNotNull(server).storageKey()
+            api.use { client ->
+                prepared.zip(items).forEach { (p, item) ->
+                    uploadFile(client, item, p.localFile, serverKey)
+                }
             }
         }
     }
 
     /** 单个文件上传：App 进程直接调用服务器 API，成功/失败同步更新 UI */
-    private suspend fun uploadFile(api: SyncClipboardApi, item: ShareItem, file: File) {
+    private suspend fun uploadFile(api: SyncClipboardApi, item: ShareItem, file: File, serverKey: String) {
         updateItem(item.transferId) { it.copy(state = ItemState.UPLOADING, progress = 0f) }
         val content = ClipboardContent(
             type = if (item.isImage) ClipboardContentType.Image else ClipboardContentType.File,
@@ -263,7 +267,7 @@ class ShareActivity : BaseActivity() {
 
         if (ok) {
             updateItem(item.transferId) { it.copy(state = ItemState.SUCCESS, progress = 1f) }
-            notifyEngineRegistered(item, file)
+            notifyEngineRegistered(item, file, serverKey)
         } else {
             updateItem(item.transferId) { it.copy(state = ItemState.FAILED, error = error) }
             // 失败文件立即清理（成功文件留给引擎登记 + 1 小时过期兜底）
@@ -273,7 +277,7 @@ class ShareActivity : BaseActivity() {
     }
 
     /** 上传成功后通知引擎：登记历史 + 更新远端缓存（避免轮询误判重复下载） */
-    private fun notifyEngineRegistered(item: ShareItem, file: File) {
+    private fun notifyEngineRegistered(item: ShareItem, file: File, serverKey: String) {
         try {
             val providerUri = FileProvider.getUriForFile(
                 this, "$packageName.fileprovider", file
@@ -283,6 +287,7 @@ class ShareActivity : BaseActivity() {
                 .to(PackageNames.SYSTEM_UI)
                 .key(BridgeKeys.REGISTER_UPLOADED)
                 .payload(Bundle().apply {
+                    putString("serverKey", serverKey)
                     putString("fileUri", providerUri.toString())
                     putString("fileName", item.fileName)
                     putBoolean("isImage", item.isImage)

@@ -15,6 +15,9 @@ object BridgeKeys {
     /** 推送配置更新 */
     const val PUSH_CONFIG = "push_config"
 
+    /** 应用带版本的配置，返回持久化与引擎生效确认。 */
+    const val APPLY_CONFIG = "apply_config"
+
     // ─── 服务器管理（app → xposed 进程）─────────────────────────
 
     /** 添加服务器 */
