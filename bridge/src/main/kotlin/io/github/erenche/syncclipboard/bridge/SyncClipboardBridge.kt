@@ -183,6 +183,9 @@ object SyncClipboardBridge {
         }
     }
 
+    /** 检查本地进程是否注册了指定 key 的处理器 */
+    fun hasHandler(key: String): Boolean = handlers.containsKey(key)
+
     /**
      * 关闭 [Bundle] 持有的所有 [ParcelFileDescriptor]（含一层嵌套 Bundle）。
      * 跨进程传输完成后由持有方调用，防止 FD 泄露；对端持有 Binder 复制的独立副本，不受影响。
@@ -316,9 +319,9 @@ object SyncClipboardBridge {
 
             Logger.debug(TAG, "executeInternal key=$targetKey, targetPkg=$targetPkg, myPkg=${context.packageName}, isSameProcess=${targetPkg == context.packageName}")
 
-            // 同一进程内通信 — 直接调用处理器，绕过广播
-            if (targetPkg == context.packageName) {
-                Logger.debug(TAG, "Using DIRECT invocation for key=$targetKey")
+            // 本地已有处理器注册（如独立服务模式）或目标为本包名 — 直接调用处理器，绕过广播
+            if (targetPkg == context.packageName || hasHandler(targetKey)) {
+                Logger.debug(TAG, "Using DIRECT invocation for key=$targetKey (hasLocalHandler=${hasHandler(targetKey)})")
                 SyncClipboardBridge.invokeHandler(
                     key = targetKey,
                     data = data,

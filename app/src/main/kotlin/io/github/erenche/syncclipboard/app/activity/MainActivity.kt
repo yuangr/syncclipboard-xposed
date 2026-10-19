@@ -8,6 +8,7 @@ import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.graphics.BitmapFactory
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
@@ -50,6 +51,9 @@ import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import io.github.erenche.syncclipboard.app.R
 import io.github.erenche.syncclipboard.app.SyncClipboardApp
+import io.github.erenche.syncclipboard.app.service.SyncForegroundService
+import io.github.erenche.syncclipboard.common.util.Logger
+import rikka.shizuku.Shizuku
 import io.github.erenche.syncclipboard.app.compose.AppToolBarListContainer
 import io.github.erenche.syncclipboard.app.compose.theme.AppTheme
 import io.github.erenche.syncclipboard.app.compose.theme.CurrentThemeConfigs
@@ -89,22 +93,53 @@ import java.util.Locale
 
 class MainActivity : BaseActivity(), SyncClipboardApp.XposedServiceStateListener {
 
+    companion object {
+        private const val SHIZUKU_PERMISSION_REQUEST_CODE = 2001
+        private const val LOCAL_NETWORK_PERMISSION_REQUEST_CODE = 1001
+        private const val NOTIFICATION_PERMISSION_REQUEST_CODE = 1002
+    }
+
     private val viewModel: MainViewModel by viewModels()
+
+    private val shizukuPermissionListener = Shizuku.OnRequestPermissionResultListener { requestCode, grantResult ->
+        if (requestCode == SHIZUKU_PERMISSION_REQUEST_CODE) {
+            if (grantResult == PackageManager.PERMISSION_GRANTED) {
+                Logger.info("MainActivity", "Shizuku permission granted by user")
+                SyncForegroundService.start(this)
+                checkModeState()
+                viewModel.refreshStatus()
+            } else {
+                Logger.warn("MainActivity", "Shizuku permission denied by user")
+            }
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         io.github.erenche.syncclipboard.app.ConfigSyncCoordinator.retry()
         val localNetworkPermission = "android.permission.ACCESS_LOCAL_NETWORK"
         if (checkSelfPermission(localNetworkPermission) != PackageManager.PERMISSION_GRANTED) {
-            requestPermissions(arrayOf(localNetworkPermission), 1001)
+            requestPermissions(arrayOf(localNetworkPermission), LOCAL_NETWORK_PERMISSION_REQUEST_CODE)
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            val postNotif = android.Manifest.permission.POST_NOTIFICATIONS
+            if (checkSelfPermission(postNotif) != PackageManager.PERMISSION_GRANTED) {
+                requestPermissions(arrayOf(postNotif), NOTIFICATION_PERMISSION_REQUEST_CODE)
+            }
         }
         setContent { MainScreen(viewModel) }
         SyncClipboardApp.addXposedServiceStateListener(this)
+        try {
+            Shizuku.addRequestPermissionResultListener(shizukuPermissionListener)
+        } catch (_: Throwable) {}
     }
 
     override fun onDestroy() {
         super.onDestroy()
         SyncClipboardApp.removeXposedServiceStateListener(this)
+        try {
+            Shizuku.removeRequestPermissionResultListener(shizukuPermissionListener)
+        } catch (_: Throwable) {}
     }
 
     override fun onResume() {
@@ -113,12 +148,35 @@ class MainActivity : BaseActivity(), SyncClipboardApp.XposedServiceStateListener
         if (viewModel.downloadedFile.value?.exists() != true) {
             viewModel.clearDownloadedState()
         }
+        checkModeState()
+    }
+
+    private fun checkModeState() {
+        val isXposedActive = SyncClipboardApp.xposedService != null
+        val isShizukuRunning = try { Shizuku.pingBinder() } catch (_: Throwable) { false }
+        val isShizukuGranted = isShizukuRunning && try {
+            Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED
+        } catch (_: Throwable) { false }
+
+        viewModel.isModuleActive.value = isXposedActive || isShizukuGranted || SyncForegroundService.isRunning
+
+        if (!isXposedActive && isShizukuRunning) {
+            if (isShizukuGranted) {
+                if (!SyncForegroundService.isRunning) {
+                    SyncForegroundService.start(this)
+                }
+            } else {
+                try {
+                    Shizuku.requestPermission(SHIZUKU_PERMISSION_REQUEST_CODE)
+                } catch (e: Exception) {
+                    Logger.warn("MainActivity", "Failed to request Shizuku permission: ${e.message}")
+                }
+            }
+        }
     }
 
     override fun onServiceStateChanged(service: io.github.libxposed.service.XposedService?) {
-        viewModel.isModuleActive.value = service != null
-        // 配置推送由 MainScreen 的 LaunchedEffect 统一负责（引擎端对相同配置幂等跳过），
-        // 这里不再重复推送，避免 app 启动时多次 PUSH_CONFIG 触发 SignalR 重建
+        checkModeState()
     }
 }
 

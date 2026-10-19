@@ -53,6 +53,7 @@ dependencies {
     implementation(project(":xposed"))
 
     implementation(libs.libxposed.service)
+    implementation(libs.shizuku.provider)
 
     // MIUIX UI
     implementation(libs.miuix.android)

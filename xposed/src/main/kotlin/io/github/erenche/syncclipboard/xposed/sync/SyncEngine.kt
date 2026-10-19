@@ -11,6 +11,8 @@ import io.github.erenche.syncclipboard.bridge.BridgeKeys
 import io.github.erenche.syncclipboard.bridge.SyncClipboardBridge
 import io.github.erenche.syncclipboard.common.PackageNames
 import io.github.erenche.syncclipboard.common.Prefs
+import io.github.erenche.syncclipboard.common.clipboard.ClipboardAccessor
+import io.github.erenche.syncclipboard.common.clipboard.SystemClipboardAccessor
 import io.github.erenche.syncclipboard.common.model.AppConfig
 import io.github.erenche.syncclipboard.common.model.ClipboardContent
 import io.github.erenche.syncclipboard.common.model.ClipboardContentType
@@ -103,6 +105,16 @@ class SyncEngine private constructor() {
         clientSession?.takeIf { it.serverKey == serverKey }
     private val apiClient: SyncClipboardApi? get() = sessionFor()?.client
     private var appContext: Context? = null
+    @Volatile
+    var clipboardAccessor: ClipboardAccessor? = null
+
+    fun getClipboard(): ClipboardAccessor {
+        return clipboardAccessor ?: synchronized(this) {
+            clipboardAccessor ?: SystemClipboardAccessor(appContext ?: error("appContext not initialized")).also {
+                clipboardAccessor = it
+            }
+        }
+    }
     private val historyServices = mutableMapOf<String, HistoryService>()
 
     /** 验证码清理任务：hash → 延迟 Job。到期时间另存 SharedPreferences，热重载后可恢复。 */
@@ -228,9 +240,12 @@ class SyncEngine private constructor() {
     /** 上传重试队列单条最大重试次数，超限丢弃 */
     private val MAX_UPLOAD_RETRY = 5
 
-    fun initialize(context: Context) {
+    fun initialize(context: Context, accessor: ClipboardAccessor? = null) {
+        if (accessor != null) {
+            clipboardAccessor = accessor
+        }
         if (appContext != null) {
-            Logger.info(TAG, "Already initialized, skipping")
+            Logger.info(TAG, "Already initialized, skipping (accessor=${accessor?.name})")
             return
         }
         appContext = context.applicationContext
@@ -692,22 +707,17 @@ class SyncEngine private constructor() {
 
     private fun registerClipListener() {
         try {
-            val context = appContext ?: return
-            val cm = context.getSystemService(Context.CLIPBOARD_SERVICE)
-                as? android.content.ClipboardManager ?: return
-            cm.addPrimaryClipChangedListener(clipChangedListener)
-            Logger.info(TAG, "OnPrimaryClipChangedListener registered")
+            getClipboard().addPrimaryClipChangedListener(clipChangedListener)
+            Logger.info(TAG, "OnPrimaryClipChangedListener registered via ${getClipboard().name}")
         } catch (e: Exception) {
             Logger.warn(TAG, "Failed to register clip listener: ${io.github.erenche.syncclipboard.common.util.SafeDiagnostics.failure(e)}")
         }
     }
 
-    private val clipChangedListener = android.content.ClipboardManager.OnPrimaryClipChangedListener {
+    private val clipChangedListener = ClipboardAccessor.OnPrimaryClipChangedListener {
         val ctx = appContext ?: return@OnPrimaryClipChangedListener
-        val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE)
-            as? android.content.ClipboardManager ?: return@OnPrimaryClipChangedListener
         // 主线程仅取 ClipData 快照；provider 查询（跨进程 Binder）转后台执行
-        val clip = cm.primaryClip ?: return@OnPrimaryClipChangedListener
+        val clip = getClipboard().getPrimaryClip() ?: return@OnPrimaryClipChangedListener
         val serverKey = config.serverStorageKey()
         scope.launch {
             val content = extractFromClip(ctx, clip) ?: return@launch
@@ -748,9 +758,7 @@ class SyncEngine private constructor() {
         // 停止 SignalR 连接
         signalRClient?.stop()
         try {
-            val cm = appContext?.getSystemService(Context.CLIPBOARD_SERVICE)
-                as? android.content.ClipboardManager
-            cm?.removePrimaryClipChangedListener(clipChangedListener)
+            clipboardAccessor?.removePrimaryClipChangedListener(clipChangedListener)
         } catch (_: Exception) {}
         Logger.info(TAG, "SyncEngine stopped")
     }
@@ -784,6 +792,7 @@ class SyncEngine private constructor() {
         // 关闭历史数据库连接（旧代 Room 实例随类加载器一起废弃）
         AppDatabase.closeInstance()
         historyServices.clear()
+        clipboardAccessor = null
         appContext = null
         synchronized(Companion) { instance = null }
         Logger.info(TAG, "SyncEngine shutdown (hot reload)")
@@ -1318,13 +1327,7 @@ class SyncEngine private constructor() {
                     notifyActionResult("upload", false, message)
                     return@launch
                 }
-                val cm = context.getSystemService(Context.CLIPBOARD_SERVICE)
-                    as? android.content.ClipboardManager ?: run {
-                    message = "No clipboard"
-                    notifyActionResult("upload", false, message)
-                    return@launch
-                }
-                val clipData = cm.primaryClip ?: run {
+                val clipData = getClipboard().getPrimaryClip() ?: run {
                     message = "Empty clipboard"
                     notifyActionResult("upload", false, message)
                     return@launch
@@ -1370,16 +1373,13 @@ class SyncEngine private constructor() {
                 val profileHash = HashUtils.sha256(text)
                 val alreadyRemote = profileHash.equals(lastRemoteHash, ignoreCase = true)
 
-                // 2. 自动复制到剪贴板（SystemUI 进程拥有完整 ClipboardService 访问权限）
+                // 2. 自动复制到剪贴板
                 val ctx = appContext
                 if (ctx != null) {
                     try {
-                        val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE)
-                            as? android.content.ClipboardManager
-                        cm?.setPrimaryClip(
-                            android.content.ClipData.newPlainText("SyncClipboard", text)
-                        )
-                        Logger.info(TAG, "uploadText: copied to clipboard")
+                        val clip = android.content.ClipData.newPlainText("SyncClipboard", text)
+                        getClipboard().setPrimaryClip(clip)
+                        Logger.info(TAG, "uploadText: copied to clipboard via ${getClipboard().name}")
                     } catch (e: Exception) {
                         Logger.warn(TAG, "uploadText: clipboard copy failed: ${io.github.erenche.syncclipboard.common.util.SafeDiagnostics.failure(e)}")
                     }
@@ -2130,16 +2130,14 @@ class SyncEngine private constructor() {
     /** 写入文本到剪贴板 */
     private fun writeToClipboard(text: String) {
         try {
-            val context = appContext ?: return
-            val clipboardManager = context.getSystemService(Context.CLIPBOARD_SERVICE)
-                as? android.content.ClipboardManager ?: return
-
             val clipData = android.content.ClipData.newPlainText("SyncClipboard", text)
-            clipboardManager.setPrimaryClip(clipData)
-
-            Logger.debug(TAG, "Written to clipboard: textLength=${text.length}")
+            if (getClipboard().setPrimaryClip(clipData)) {
+                Logger.debug(TAG, "Written to clipboard via ${getClipboard().name}: textLength=${text.length}")
+            } else {
+                Logger.error(TAG, "Failed to write to clipboard via ${getClipboard().name}")
+            }
         } catch (e: Exception) {
-            Logger.error(TAG, "Failed to write to clipboard")
+            Logger.error(TAG, "Failed to write to clipboard: ${io.github.erenche.syncclipboard.common.util.SafeDiagnostics.failure(e)}")
         }
     }
 
@@ -2147,19 +2145,19 @@ class SyncEngine private constructor() {
     private fun writeToClipboardUri(uri: android.net.Uri, label: String, mime: String) {
         try {
             val context = appContext ?: return
-            val clipboardManager = context.getSystemService(Context.CLIPBOARD_SERVICE)
-                as? android.content.ClipboardManager ?: return
-
             val clipData = android.content.ClipData.newUri(
                 context.contentResolver,
                 "SyncClipboard",
                 uri
             )
-            clipboardManager.setPrimaryClip(clipData)
-
-            Logger.info(TAG, "Written URI to clipboard: $uri, mime=$mime, label=$label")
+            if (getClipboard().setPrimaryClip(clipData)) {
+                Logger.info(TAG, "Written URI to clipboard via ${getClipboard().name}: $uri, mime=$mime, label=$label")
+            } else {
+                Logger.warn(TAG, "Failed to write URI to clipboard via ${getClipboard().name}, falling back to text")
+                writeToClipboard(label)
+            }
         } catch (e: Exception) {
-            Logger.error(TAG, "Failed to write URI to clipboard, falling back to text")
+            Logger.error(TAG, "Failed to write URI to clipboard, falling back to text: ${io.github.erenche.syncclipboard.common.util.SafeDiagnostics.failure(e)}")
             writeToClipboard(label)
         }
     }

@@ -48,6 +48,7 @@ configure<LibraryExtension> {
 dependencies {
     api(libs.kotlinx.serialization.json)
     api(libs.androidx.core.ktx)
+    api(libs.shizuku.api)
 
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)

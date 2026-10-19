@@ -39,6 +39,9 @@ materialIconsExtended = "1.7.8"
 xposed-api = "102.0.0"
 xposed-service = "102.0.0"
 
+# Shizuku
+shizuku = "13.1.5"
+
 # Testing
 androidxJunit = "1.3.0"
 espresso = "3.7.0"
@@ -92,6 +95,10 @@ material-icons-extended = { group = "androidx.compose.material", name = "materia
 
 # ===== AboutLibraries（开源许可列表，参考 ReSukiSU / lyricon）=====
 aboutlibraries-core = { module = "com.mikepenz:aboutlibraries-core", version = "14.2.1" }
+
+# ===== Shizuku =====
+shizuku-api = { module = "dev.rikka.shizuku:api", version.ref = "shizuku" }
+shizuku-provider = { module = "dev.rikka.shizuku:provider", version.ref = "shizuku" }
 
 # ===== Testing =====
 androidx-espresso-core = { group = "androidx.test.espresso", name = "espresso-core", version.ref = "espresso" }
