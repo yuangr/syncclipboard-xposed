@@ -49,6 +49,7 @@ dependencies {
     api(libs.kotlinx.serialization.json)
     api(libs.androidx.core.ktx)
     api(libs.shizuku.api)
+    api(libs.shizuku.provider)
 
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)

@@ -101,6 +101,18 @@ class MainActivity : BaseActivity(), SyncClipboardApp.XposedServiceStateListener
 
     private val viewModel: MainViewModel by viewModels()
 
+    private val binderReceivedListener = Shizuku.OnBinderReceivedListener {
+        runOnUiThread {
+            checkModeState()
+        }
+    }
+
+    private val binderDeadListener = Shizuku.OnBinderDeadListener {
+        runOnUiThread {
+            checkModeState()
+        }
+    }
+
     private val shizukuPermissionListener = Shizuku.OnRequestPermissionResultListener { requestCode, grantResult ->
         if (requestCode == SHIZUKU_PERMISSION_REQUEST_CODE) {
             if (grantResult == PackageManager.PERMISSION_GRANTED) {
@@ -117,19 +129,25 @@ class MainActivity : BaseActivity(), SyncClipboardApp.XposedServiceStateListener
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         io.github.erenche.syncclipboard.app.ConfigSyncCoordinator.retry()
+        val permissionsToRequest = mutableListOf<String>()
         val localNetworkPermission = "android.permission.ACCESS_LOCAL_NETWORK"
         if (checkSelfPermission(localNetworkPermission) != PackageManager.PERMISSION_GRANTED) {
-            requestPermissions(arrayOf(localNetworkPermission), LOCAL_NETWORK_PERMISSION_REQUEST_CODE)
+            permissionsToRequest.add(localNetworkPermission)
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             val postNotif = android.Manifest.permission.POST_NOTIFICATIONS
             if (checkSelfPermission(postNotif) != PackageManager.PERMISSION_GRANTED) {
-                requestPermissions(arrayOf(postNotif), NOTIFICATION_PERMISSION_REQUEST_CODE)
+                permissionsToRequest.add(postNotif)
             }
+        }
+        if (permissionsToRequest.isNotEmpty()) {
+            requestPermissions(permissionsToRequest.toTypedArray(), LOCAL_NETWORK_PERMISSION_REQUEST_CODE)
         }
         setContent { MainScreen(viewModel) }
         SyncClipboardApp.addXposedServiceStateListener(this)
         try {
+            Shizuku.addBinderReceivedListenerSticky(binderReceivedListener)
+            Shizuku.addBinderDeadListener(binderDeadListener)
             Shizuku.addRequestPermissionResultListener(shizukuPermissionListener)
         } catch (_: Throwable) {}
     }
@@ -138,6 +156,8 @@ class MainActivity : BaseActivity(), SyncClipboardApp.XposedServiceStateListener
         super.onDestroy()
         SyncClipboardApp.removeXposedServiceStateListener(this)
         try {
+            Shizuku.removeBinderReceivedListener(binderReceivedListener)
+            Shizuku.removeBinderDeadListener(binderDeadListener)
             Shizuku.removeRequestPermissionResultListener(shizukuPermissionListener)
         } catch (_: Throwable) {}
     }
@@ -153,20 +173,30 @@ class MainActivity : BaseActivity(), SyncClipboardApp.XposedServiceStateListener
 
     private fun checkModeState() {
         val isXposedActive = SyncClipboardApp.xposedService != null
-        val isShizukuRunning = try { Shizuku.pingBinder() } catch (_: Throwable) { false }
+        val isShizukuRunning = try { Shizuku.pingBinder() } catch (t: Throwable) {
+            Logger.warn("MainActivity", "pingBinder exception: ${t.message}")
+            false
+        }
         val isShizukuGranted = isShizukuRunning && try {
             Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED
-        } catch (_: Throwable) { false }
+        } catch (t: Throwable) {
+            Logger.warn("MainActivity", "checkSelfPermission exception: ${t.message}")
+            false
+        }
+
+        Logger.info("MainActivity", "checkModeState: xposed=$isXposedActive, shizukuRunning=$isShizukuRunning, shizukuGranted=$isShizukuGranted, fgsRunning=${SyncForegroundService.isRunning}")
 
         viewModel.isModuleActive.value = isXposedActive || isShizukuGranted || SyncForegroundService.isRunning
 
         if (!isXposedActive && isShizukuRunning) {
             if (isShizukuGranted) {
                 if (!SyncForegroundService.isRunning) {
+                    Logger.info("MainActivity", "Starting SyncForegroundService")
                     SyncForegroundService.start(this)
                 }
             } else {
                 try {
+                    Logger.info("MainActivity", "Requesting Shizuku permission")
                     Shizuku.requestPermission(SHIZUKU_PERMISSION_REQUEST_CODE)
                 } catch (e: Exception) {
                     Logger.warn("MainActivity", "Failed to request Shizuku permission: ${e.message}")
